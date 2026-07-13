@@ -1,15 +1,24 @@
 name: Set up Node and pnpm
 description: Install an exact pnpm release in an isolated job directory after setting up Node.
 
+outputs:
+  pnpm-version:
+    description: Exact pnpm version selected from the input, packageManager, or fallback.
+    value: ${{ steps.resolve_pnpm.outputs.version }}
+
 inputs:
   node-version:
     description: Node.js version passed to actions/setup-node.
     required: false
     default: "24"
   pnpm-version:
-    description: Exact stable pnpm version installed with npm.
+    description: Exact stable pnpm version override. By default the action reads packageManager.
     required: false
-    default: "11.12.0"
+    default: ""
+  package-manager-file:
+    description: package.json path, relative to the workspace, used to resolve packageManager.
+    required: false
+    default: "package.json"
   registry-url:
     description: Package registry configured by actions/setup-node.
     required: false
@@ -30,16 +39,30 @@ runs:
         scope: ${{ inputs.scope }}
         check-latest: false
 
+    - name: Resolve exact pnpm version
+      id: resolve_pnpm
+      shell: bash
+      env:
+        EXPLICIT_PNPM_VERSION: ${{ inputs.pnpm-version }}
+        PACKAGE_MANAGER_FILE: ${{ inputs.package-manager-file }}
+      run: |
+        set -euo pipefail
+        manifest="$PACKAGE_MANAGER_FILE"
+        if [[ "$manifest" != /* ]]; then
+          manifest="$GITHUB_WORKSPACE/$manifest"
+        fi
+        version="$(node "$GITHUB_ACTION_PATH/resolve-pnpm-version.mjs" \
+          --explicit "$EXPLICIT_PNPM_VERSION" \
+          --manifest "$manifest" \
+          --fallback "11.13.0")"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
     - name: Install exact pnpm in an isolated prefix
       shell: bash
       env:
-        PNPM_VERSION: ${{ inputs.pnpm-version }}
+        PNPM_VERSION: ${{ steps.resolve_pnpm.outputs.version }}
       run: |
         set -euo pipefail
-        if [[ ! "$PNPM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::pnpm-version must be an exact stable semver" >&2
-          exit 2
-        fi
 
         pnpm_root="${RUNNER_TEMP}/pnpm-cli-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_JOB}"
         rm -rf "$pnpm_root"
@@ -52,4 +75,3 @@ runs:
         } >> "$GITHUB_ENV"
         echo "$pnpm_root/bin" >> "$GITHUB_PATH"
         "$pnpm_root/bin/pnpm" --version
-

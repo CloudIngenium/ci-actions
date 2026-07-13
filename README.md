@@ -10,12 +10,15 @@ SHA.
 - uses: CloudIngenium/ci-actions/setup-node-pnpm@<full-commit-sha>
   with:
     node-version: "24"
-    pnpm-version: "11.12.0"
 ```
 
-The action installs Node first, then installs an exact stable pnpm release with
-npm into a job-scoped directory under `RUNNER_TEMP`. It never uses Corepack or
-`pnpm/action-setup`, and it does not share a pnpm CLI or store between jobs.
+The action installs Node first, resolves the exact stable pnpm version from the
+root `package.json#packageManager`, then installs it with npm into a job-scoped
+directory under `RUNNER_TEMP`. `pnpm-version` remains available as an explicit
+override, and `package-manager-file` selects a nested installation boundary.
+When no declaration exists, the action falls back to pnpm 11.13.0. It never uses
+Corepack or `pnpm/action-setup`, and it does not share a pnpm CLI or store between
+jobs.
 
 ## Clean stale Git locks
 
