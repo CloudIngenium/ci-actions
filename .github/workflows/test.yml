@@ -1,0 +1,31 @@
+name: Test actions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  setup-node-pnpm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./setup-node-pnpm
+      - name: Verify exact isolated toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(node --version)" in
+            v24.*) ;;
+            *) echo "::error::Node 24 was not installed"; exit 1 ;;
+          esac
+          test "$(pnpm --version)" = "11.12.0"
+          case "$PNPM_HOME" in
+            "$RUNNER_TEMP"/*) ;;
+            *) echo "::error::PNPM_HOME is not job-scoped: $PNPM_HOME"; exit 1 ;;
+          esac
