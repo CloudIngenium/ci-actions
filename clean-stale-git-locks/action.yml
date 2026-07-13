@@ -1,0 +1,73 @@
+name: Clean stale Git locks
+description: Remove old, unused Git lock files from persistent self-hosted runner workspaces.
+
+inputs:
+  workspace:
+    description: Workspace containing the Git checkout to repair.
+    required: false
+    default: ""
+  min-age-seconds:
+    description: Minimum lock age before removal.
+    required: false
+    default: "300"
+
+outputs:
+  removed-count:
+    description: Number of stale lock files removed.
+    value: ${{ steps.clean.outputs.removed-count }}
+
+runs:
+  using: composite
+  steps:
+    - id: clean
+      name: Remove unused stale locks
+      shell: bash
+      env:
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
+        MIN_AGE_SECONDS: ${{ inputs.min-age-seconds }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$MIN_AGE_SECONDS" =~ ^[0-9]+$ ]]; then
+          echo "::error::min-age-seconds must be a non-negative integer" >&2
+          exit 2
+        fi
+
+        workspace="${INPUT_WORKSPACE:-${GITHUB_WORKSPACE:-$PWD}}"
+        git_dir="$workspace/.git"
+        removed=0
+        if [ ! -d "$git_dir" ]; then
+          echo "removed-count=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        now=$(date +%s)
+        while IFS= read -r -d '' lock; do
+          if modified=$(stat -c %Y "$lock" 2>/dev/null); then
+            :
+          elif modified=$(stat -f %m "$lock" 2>/dev/null); then
+            :
+          else
+            echo "::warning file=$lock::Unable to read lock age; leaving it in place"
+            continue
+          fi
+          if (( now - modified < MIN_AGE_SECONDS )); then
+            continue
+          fi
+          in_use=false
+          if command -v lsof >/dev/null 2>&1 && lsof -t -- "$lock" >/dev/null 2>&1; then
+            in_use=true
+          elif [ "$(uname -s)" = "Linux" ] && command -v fuser >/dev/null 2>&1 && fuser "$lock" >/dev/null 2>&1; then
+            in_use=true
+          fi
+          if [ "$in_use" = true ]; then
+            echo "::warning file=$lock::Lock is in use; leaving it in place"
+            continue
+          fi
+          rm -f -- "$lock"
+          removed=$((removed + 1))
+        done < <(find "$git_dir" -type f -name '*.lock' -print0 2>/dev/null)
+
+        echo "removed-count=$removed" >> "$GITHUB_OUTPUT"
+        if (( removed > 0 )); then
+          echo "Removed $removed stale Git lock file(s) from $workspace"
+        fi
