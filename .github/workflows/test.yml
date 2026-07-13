@@ -11,29 +11,55 @@ permissions:
 
 jobs:
   clean-stale-git-locks:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Create stale and fresh locks
+      - name: Create stale and fresh locks (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           fixture="$RUNNER_TEMP/stale-lock-fixture"
           mkdir -p "$fixture/.git/refs/remotes/origin"
           touch -d '10 minutes ago' "$fixture/.git/refs/remotes/origin/main.lock"
           touch "$fixture/.git/index.lock"
+      - name: Create stale and fresh locks (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP "stale-lock-fixture"
+          $refs = Join-Path $fixture ".git/refs/remotes/origin"
+          New-Item -ItemType Directory -Path $refs -Force | Out-Null
+          $stale = Join-Path $refs "main.lock"
+          $fresh = Join-Path $fixture ".git/index.lock"
+          New-Item -ItemType File -Path $stale -Force | Out-Null
+          New-Item -ItemType File -Path $fresh -Force | Out-Null
+          (Get-Item -LiteralPath $stale).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
       - id: clean
         uses: ./clean-stale-git-locks
         with:
           workspace: ${{ runner.temp }}/stale-lock-fixture
           min-age-seconds: "60"
-      - name: Verify conservative cleanup
+      - name: Verify conservative cleanup (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           fixture="$RUNNER_TEMP/stale-lock-fixture"
           test "${{ steps.clean.outputs.removed-count }}" = "1"
           test ! -e "$fixture/.git/refs/remotes/origin/main.lock"
           test -e "$fixture/.git/index.lock"
+      - name: Verify conservative cleanup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP "stale-lock-fixture"
+          if ("${{ steps.clean.outputs.removed-count }}" -ne "1") { throw "Expected one removed lock" }
+          if (Test-Path -LiteralPath (Join-Path $fixture ".git/refs/remotes/origin/main.lock")) { throw "Stale lock remains" }
+          if (-not (Test-Path -LiteralPath (Join-Path $fixture ".git/index.lock"))) { throw "Fresh lock was removed" }
 
   setup-node-pnpm:
     runs-on: ubuntu-latest
