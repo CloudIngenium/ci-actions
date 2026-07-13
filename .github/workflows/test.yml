@@ -10,6 +10,31 @@ permissions:
   contents: read
 
 jobs:
+  clean-stale-git-locks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Create stale and fresh locks
+        shell: bash
+        run: |
+          fixture="$RUNNER_TEMP/stale-lock-fixture"
+          mkdir -p "$fixture/.git/refs/remotes/origin"
+          touch -d '10 minutes ago' "$fixture/.git/refs/remotes/origin/main.lock"
+          touch "$fixture/.git/index.lock"
+      - id: clean
+        uses: ./clean-stale-git-locks
+        with:
+          workspace: ${{ runner.temp }}/stale-lock-fixture
+          min-age-seconds: "60"
+      - name: Verify conservative cleanup
+        shell: bash
+        run: |
+          fixture="$RUNNER_TEMP/stale-lock-fixture"
+          test "${{ steps.clean.outputs.removed-count }}" = "1"
+          test ! -e "$fixture/.git/refs/remotes/origin/main.lock"
+          test -e "$fixture/.git/index.lock"
+
   setup-node-pnpm:
     runs-on: ubuntu-latest
     timeout-minutes: 10
