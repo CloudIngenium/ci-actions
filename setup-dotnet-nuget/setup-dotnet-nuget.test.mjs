@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -57,4 +57,12 @@ test("restore arguments are deterministic and locked by default", () => {
     ["restore", "Zap.CI.slnx", "--nologo", "--locked-mode", "--verbosity", "minimal"],
   );
   assert.throws(() => buildRestoreArguments({ profile: "verbose" }), /normal or diagnostic/);
+});
+
+test("composite step ids remain expression-safe across operating systems", async () => {
+  const source = await readFile(new URL("./action.yml", import.meta.url), "utf8");
+  assert.match(source, /id: resolve_unix/);
+  assert.match(source, /id: resolve_windows/);
+  assert.match(source, /steps\.resolve_windows\.outputs\['sdk-version'\]/);
+  assert.doesNotMatch(source, /steps\.(?:resolve|restore)-(?:unix|windows)/);
 });
