@@ -1,0 +1,209 @@
+name: Set up exact .NET SDK and persistent NuGet
+description: Prefer an installed exact SDK, configure persistent NuGet stores, and optionally restore with bounded diagnostics.
+
+inputs:
+  sdk-version:
+    description: Optional exact SDK assertion. It must match global.json sdk.version.
+    required: false
+    default: ""
+  global-json-file:
+    description: Required global.json path relative to the workspace; it pins subsequent dotnet commands.
+    required: false
+    default: "global.json"
+  sdk-setup-mode:
+    description: system-first uses an installed exact SDK; setup always invokes actions/setup-dotnet.
+    required: false
+    default: "system-first"
+  cache-root:
+    description: Persistent cache root. Relative values resolve below RUNNER_TOOL_CACHE.
+    required: false
+    default: ""
+  cache-namespace:
+    description: Bounded namespace for the persistent NuGet stores.
+    required: false
+    default: "cloudingenium"
+  restore-enabled:
+    description: Run dotnet restore after toolchain setup.
+    required: false
+    default: "false"
+  restore-path:
+    description: Solution, project, or directory relative to the workspace.
+    required: false
+    default: "."
+  locked-mode:
+    description: Pass --locked-mode to dotnet restore.
+    required: false
+    default: "true"
+  restore-profile:
+    description: normal or diagnostic. Diagnostic output is redacted and capped at 2 MiB.
+    required: false
+    default: "normal"
+  diagnostics-path:
+    description: Diagnostic log path relative to RUNNER_TEMP.
+    required: false
+    default: "nuget-restore-diagnostics.log"
+  summary-path:
+    description: Restore summary path relative to RUNNER_TEMP.
+    required: false
+    default: "nuget-restore-summary.json"
+
+outputs:
+  sdk-version:
+    description: Exact SDK selected.
+    value: ${{ steps.resolve-unix.outputs['sdk-version'] || steps.resolve-windows.outputs['sdk-version'] }}
+  sdk-source:
+    description: system or setup.
+    value: ${{ steps.resolve-unix.outputs['sdk-source'] || steps.resolve-windows.outputs['sdk-source'] }}
+  cache-root:
+    description: Persistent cache root.
+    value: ${{ steps.resolve-unix.outputs['cache-root'] || steps.resolve-windows.outputs['cache-root'] }}
+  packages-path:
+    description: NUGET_PACKAGES path.
+    value: ${{ steps.resolve-unix.outputs['packages-path'] || steps.resolve-windows.outputs['packages-path'] }}
+  http-cache-path:
+    description: NUGET_HTTP_CACHE_PATH.
+    value: ${{ steps.resolve-unix.outputs['http-cache-path'] || steps.resolve-windows.outputs['http-cache-path'] }}
+  sdk-context-directory:
+    description: Directory containing the exact global.json used for SDK resolution.
+    value: ${{ steps.resolve-unix.outputs['sdk-context-directory'] || steps.resolve-windows.outputs['sdk-context-directory'] }}
+  restore-duration-ms:
+    description: Restore duration, or empty when restore is disabled.
+    value: ${{ steps.restore-unix.outputs['restore-duration-ms'] || steps.restore-windows.outputs['restore-duration-ms'] }}
+  restore-summary-path:
+    description: v4 restore summary, or empty when restore is disabled.
+    value: ${{ steps.restore-unix.outputs['restore-summary-path'] || steps.restore-windows.outputs['restore-summary-path'] }}
+  diagnostics-path:
+    description: Redacted diagnostic log, or empty for normal restore.
+    value: ${{ steps.restore-unix.outputs['diagnostics-path'] || steps.restore-windows.outputs['diagnostics-path'] }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve-unix
+      name: Resolve SDK and persistent stores
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        INPUT_SDK_VERSION: ${{ inputs.sdk-version }}
+        INPUT_GLOBAL_JSON: ${{ inputs.global-json-file }}
+        INPUT_SETUP_MODE: ${{ inputs.sdk-setup-mode }}
+        INPUT_CACHE_ROOT: ${{ inputs.cache-root }}
+        INPUT_CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
+        RESTORE_ENABLED: ${{ inputs.restore-enabled }}
+        LOCKED_MODE: ${{ inputs.locked-mode }}
+        RESTORE_PROFILE: ${{ inputs.restore-profile }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/resolve-dotnet.mjs" \
+          --sdk-version "$INPUT_SDK_VERSION" \
+          --global-json-file "$INPUT_GLOBAL_JSON" \
+          --sdk-setup-mode "$INPUT_SETUP_MODE" \
+          --cache-root "$INPUT_CACHE_ROOT" \
+          --cache-namespace "$INPUT_CACHE_NAMESPACE" \
+          --restore-enabled "$RESTORE_ENABLED" \
+          --locked-mode "$LOCKED_MODE" \
+          --restore-profile "$RESTORE_PROFILE" \
+          --github-env "$GITHUB_ENV" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - id: resolve-windows
+      name: Resolve SDK and persistent stores
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        INPUT_SDK_VERSION: ${{ inputs.sdk-version }}
+        INPUT_GLOBAL_JSON: ${{ inputs.global-json-file }}
+        INPUT_SETUP_MODE: ${{ inputs.sdk-setup-mode }}
+        INPUT_CACHE_ROOT: ${{ inputs.cache-root }}
+        INPUT_CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
+        RESTORE_ENABLED: ${{ inputs.restore-enabled }}
+        LOCKED_MODE: ${{ inputs.locked-mode }}
+        RESTORE_PROFILE: ${{ inputs.restore-profile }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/resolve-dotnet.mjs" `
+          --sdk-version "$env:INPUT_SDK_VERSION" `
+          --global-json-file "$env:INPUT_GLOBAL_JSON" `
+          --sdk-setup-mode "$env:INPUT_SETUP_MODE" `
+          --cache-root "$env:INPUT_CACHE_ROOT" `
+          --cache-namespace "$env:INPUT_CACHE_NAMESPACE" `
+          --restore-enabled "$env:RESTORE_ENABLED" `
+          --locked-mode "$env:LOCKED_MODE" `
+          --restore-profile "$env:RESTORE_PROFILE" `
+          --github-env "$env:GITHUB_ENV" `
+          --github-output "$env:GITHUB_OUTPUT"
+
+    - name: Install exact .NET SDK
+      if: steps.resolve-unix.outputs['needs-setup'] == 'true' || steps.resolve-windows.outputs['needs-setup'] == 'true'
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: ${{ steps.resolve-unix.outputs['sdk-version'] || steps.resolve-windows.outputs['sdk-version'] }}
+        cache: false
+
+    - name: Verify exact .NET SDK (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        SDK_VERSION: ${{ steps.resolve-unix.outputs['sdk-version'] }}
+      run: node "$GITHUB_ACTION_PATH/verify-dotnet.mjs" "$SDK_VERSION"
+
+    - name: Verify exact .NET SDK (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        SDK_VERSION: ${{ steps.resolve-windows.outputs['sdk-version'] }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/verify-dotnet.mjs" "$env:SDK_VERSION"
+
+    - id: restore-unix
+      name: Restore locked dependencies
+      if: runner.os != 'Windows' && inputs.restore-enabled == 'true'
+      shell: bash
+      env:
+        RESTORE_PATH: ${{ inputs.restore-path }}
+        LOCKED_MODE: ${{ inputs.locked-mode }}
+        RESTORE_PROFILE: ${{ inputs.restore-profile }}
+        DIAGNOSTICS_PATH: ${{ inputs.diagnostics-path }}
+        SUMMARY_PATH: ${{ inputs.summary-path }}
+        SDK_VERSION: ${{ steps.resolve-unix.outputs['sdk-version'] }}
+        SDK_SOURCE: ${{ steps.resolve-unix.outputs['sdk-source'] }}
+        SDK_CONTEXT: ${{ steps.resolve-unix.outputs['sdk-context-directory'] }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/restore.mjs" \
+          --restore-path "$RESTORE_PATH" \
+          --locked-mode "$LOCKED_MODE" \
+          --restore-profile "$RESTORE_PROFILE" \
+          --diagnostics-path "$DIAGNOSTICS_PATH" \
+          --summary-path "$SUMMARY_PATH" \
+          --sdk-version "$SDK_VERSION" \
+          --sdk-source "$SDK_SOURCE" \
+          --sdk-context-directory "$SDK_CONTEXT" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - id: restore-windows
+      name: Restore locked dependencies
+      if: runner.os == 'Windows' && inputs.restore-enabled == 'true'
+      shell: pwsh
+      env:
+        RESTORE_PATH: ${{ inputs.restore-path }}
+        LOCKED_MODE: ${{ inputs.locked-mode }}
+        RESTORE_PROFILE: ${{ inputs.restore-profile }}
+        DIAGNOSTICS_PATH: ${{ inputs.diagnostics-path }}
+        SUMMARY_PATH: ${{ inputs.summary-path }}
+        SDK_VERSION: ${{ steps.resolve-windows.outputs['sdk-version'] }}
+        SDK_SOURCE: ${{ steps.resolve-windows.outputs['sdk-source'] }}
+        SDK_CONTEXT: ${{ steps.resolve-windows.outputs['sdk-context-directory'] }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/restore.mjs" `
+          --restore-path "$env:RESTORE_PATH" `
+          --locked-mode "$env:LOCKED_MODE" `
+          --restore-profile "$env:RESTORE_PROFILE" `
+          --diagnostics-path "$env:DIAGNOSTICS_PATH" `
+          --summary-path "$env:SUMMARY_PATH" `
+          --sdk-version "$env:SDK_VERSION" `
+          --sdk-source "$env:SDK_SOURCE" `
+          --sdk-context-directory "$env:SDK_CONTEXT" `
+          --github-output "$env:GITHUB_OUTPUT"

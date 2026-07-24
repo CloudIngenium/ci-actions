@@ -1,0 +1,206 @@
+name: Emit canonical CI phase v4
+description: Validate and write a canonical Knowledge-Hub ci_phase event plus a bounded provenance envelope.
+
+inputs:
+  phase:
+    description: Stable lower-case phase identifier using letters, digits, and underscores.
+    required: true
+  sequence:
+    description: Stable phase sequence within the job, from 0 through 1000.
+    required: false
+    default: "0"
+  status:
+    description: Canonical CI control v4 status.
+    required: true
+  started-at:
+    description: RFC 3339 phase start timestamp.
+    required: true
+  completed-at:
+    description: RFC 3339 phase completion timestamp.
+    required: true
+  observed-at:
+    description: Optional RFC 3339 local observation timestamp.
+    required: false
+    default: ""
+  duration-ms:
+    description: Optional integer duration. When omitted it is derived from timestamps.
+    required: false
+    default: ""
+  unit:
+    description: Validation guard for callers. Only ms is accepted and the canonical payload omits this redundant field.
+    required: false
+    default: "ms"
+  job-id:
+    description: Exact numeric GitHub workflow job ID; required by the canonical identity.
+    required: true
+  fingerprint-version:
+    description: Knowledge-Hub fingerprint contract version.
+    required: false
+    default: "1"
+  pool-mapping-version:
+    description: Knowledge-Hub pool mapping version.
+    required: false
+    default: "3"
+  policy-version:
+    description: Knowledge-Hub CI control policy version.
+    required: false
+    default: "local-first-shadow-v4"
+  collector-mode:
+    description: fast, slow, all, hook, or webhook.
+    required: false
+    default: "hook"
+  selected-lane:
+    description: Optional canonical lane selected for the job.
+    required: false
+    default: ""
+  trace-id:
+    description: Optional 32-character trace ID. Deterministically derived when omitted.
+    required: false
+    default: ""
+  span-id:
+    description: Optional 16-character phase span ID. Deterministically derived when omitted.
+    required: false
+    default: ""
+  parent-span-id:
+    description: Optional 16-character job span ID. Deterministically derived when omitted.
+    required: false
+    default: ""
+  correlation-quality:
+    description: exact, rest_exact, reconciled, or estimated.
+    required: false
+    default: "exact"
+  source-manifest-sha256:
+    description: SHA-256 of the Knowledge-Hub generated CI control v4 contract manifest.
+    required: true
+  metadata-json:
+    description: Bounded legacy metadata retained only in the provenance envelope, never in canonical_event.
+    required: false
+    default: "{}"
+  output-path:
+    description: Canonical ci_phase path relative to RUNNER_TEMP.
+    required: false
+    default: "ci-phase.json"
+  envelope-path:
+    description: Provenance envelope path relative to RUNNER_TEMP.
+    required: false
+    default: "ci-phase-envelope.json"
+  append-ndjson-path:
+    description: Optional canonical-event NDJSON spool path relative to RUNNER_TEMP.
+    required: false
+    default: ""
+
+outputs:
+  payload-path:
+    description: Absolute path to the canonical ci_phase event.
+    value: ${{ steps.emit-unix.outputs['payload-path'] || steps.emit-windows.outputs['payload-path'] }}
+  payload-sha256:
+    description: SHA-256 of the canonical event.
+    value: ${{ steps.emit-unix.outputs['payload-sha256'] || steps.emit-windows.outputs['payload-sha256'] }}
+  envelope-path:
+    description: Absolute path to the provenance envelope and redacted raw metadata.
+    value: ${{ steps.emit-unix.outputs['envelope-path'] || steps.emit-windows.outputs['envelope-path'] }}
+  append-path:
+    description: Absolute spool path when append-ndjson-path was supplied.
+    value: ${{ steps.emit-unix.outputs['append-path'] || steps.emit-windows.outputs['append-path'] }}
+  source-manifest-sha256:
+    description: Validated KH contract-manifest digest recorded in provenance.
+    value: ${{ steps.emit-unix.outputs['source-manifest-sha256'] || steps.emit-windows.outputs['source-manifest-sha256'] }}
+  redacted-field-count:
+    description: Number of raw metadata fields or values redacted in the envelope.
+    value: ${{ steps.emit-unix.outputs['redacted-field-count'] || steps.emit-windows.outputs['redacted-field-count'] }}
+  duration-ms:
+    description: Validated duration in milliseconds.
+    value: ${{ steps.emit-unix.outputs['duration-ms'] || steps.emit-windows.outputs['duration-ms'] }}
+  trace-id:
+    description: Canonical trace ID.
+    value: ${{ steps.emit-unix.outputs['trace-id'] || steps.emit-windows.outputs['trace-id'] }}
+  span-id:
+    description: Canonical phase span ID.
+    value: ${{ steps.emit-unix.outputs['span-id'] || steps.emit-windows.outputs['span-id'] }}
+
+runs:
+  using: composite
+  steps:
+    - id: emit-unix
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        INPUT_PHASE: ${{ inputs.phase }}
+        INPUT_SEQUENCE: ${{ inputs.sequence }}
+        INPUT_STATUS: ${{ inputs.status }}
+        INPUT_STARTED_AT: ${{ inputs.started-at }}
+        INPUT_COMPLETED_AT: ${{ inputs.completed-at }}
+        INPUT_OBSERVED_AT: ${{ inputs.observed-at }}
+        INPUT_DURATION_MS: ${{ inputs.duration-ms }}
+        INPUT_UNIT: ${{ inputs.unit }}
+        INPUT_JOB_ID: ${{ inputs.job-id }}
+        INPUT_FINGERPRINT_VERSION: ${{ inputs.fingerprint-version }}
+        INPUT_POOL_MAPPING_VERSION: ${{ inputs.pool-mapping-version }}
+        INPUT_POLICY_VERSION: ${{ inputs.policy-version }}
+        INPUT_COLLECTOR_MODE: ${{ inputs.collector-mode }}
+        INPUT_SELECTED_LANE: ${{ inputs.selected-lane }}
+        INPUT_TRACE_ID: ${{ inputs.trace-id }}
+        INPUT_SPAN_ID: ${{ inputs.span-id }}
+        INPUT_PARENT_SPAN_ID: ${{ inputs.parent-span-id }}
+        INPUT_CORRELATION_QUALITY: ${{ inputs.correlation-quality }}
+        INPUT_SOURCE_MANIFEST_SHA: ${{ inputs.source-manifest-sha256 }}
+        INPUT_METADATA_JSON: ${{ inputs.metadata-json }}
+        INPUT_OUTPUT_PATH: ${{ inputs.output-path }}
+        INPUT_ENVELOPE_PATH: ${{ inputs.envelope-path }}
+        INPUT_APPEND_PATH: ${{ inputs.append-ndjson-path }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/emit-ci-phase.mjs" \
+          --phase "$INPUT_PHASE" --sequence "$INPUT_SEQUENCE" --status "$INPUT_STATUS" \
+          --started-at "$INPUT_STARTED_AT" --completed-at "$INPUT_COMPLETED_AT" \
+          --observed-at "$INPUT_OBSERVED_AT" --duration-ms "$INPUT_DURATION_MS" --unit "$INPUT_UNIT" \
+          --job-id "$INPUT_JOB_ID" --fingerprint-version "$INPUT_FINGERPRINT_VERSION" \
+          --pool-mapping-version "$INPUT_POOL_MAPPING_VERSION" --policy-version "$INPUT_POLICY_VERSION" \
+          --collector-mode "$INPUT_COLLECTOR_MODE" --selected-lane "$INPUT_SELECTED_LANE" \
+          --trace-id "$INPUT_TRACE_ID" --span-id "$INPUT_SPAN_ID" \
+          --parent-span-id "$INPUT_PARENT_SPAN_ID" --correlation-quality "$INPUT_CORRELATION_QUALITY" \
+          --source-manifest-sha256 "$INPUT_SOURCE_MANIFEST_SHA" --metadata-json "$INPUT_METADATA_JSON" \
+          --output-path "$INPUT_OUTPUT_PATH" --envelope-path "$INPUT_ENVELOPE_PATH" \
+          --append-ndjson-path "$INPUT_APPEND_PATH" --github-output "$GITHUB_OUTPUT"
+
+    - id: emit-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        INPUT_PHASE: ${{ inputs.phase }}
+        INPUT_SEQUENCE: ${{ inputs.sequence }}
+        INPUT_STATUS: ${{ inputs.status }}
+        INPUT_STARTED_AT: ${{ inputs.started-at }}
+        INPUT_COMPLETED_AT: ${{ inputs.completed-at }}
+        INPUT_OBSERVED_AT: ${{ inputs.observed-at }}
+        INPUT_DURATION_MS: ${{ inputs.duration-ms }}
+        INPUT_UNIT: ${{ inputs.unit }}
+        INPUT_JOB_ID: ${{ inputs.job-id }}
+        INPUT_FINGERPRINT_VERSION: ${{ inputs.fingerprint-version }}
+        INPUT_POOL_MAPPING_VERSION: ${{ inputs.pool-mapping-version }}
+        INPUT_POLICY_VERSION: ${{ inputs.policy-version }}
+        INPUT_COLLECTOR_MODE: ${{ inputs.collector-mode }}
+        INPUT_SELECTED_LANE: ${{ inputs.selected-lane }}
+        INPUT_TRACE_ID: ${{ inputs.trace-id }}
+        INPUT_SPAN_ID: ${{ inputs.span-id }}
+        INPUT_PARENT_SPAN_ID: ${{ inputs.parent-span-id }}
+        INPUT_CORRELATION_QUALITY: ${{ inputs.correlation-quality }}
+        INPUT_SOURCE_MANIFEST_SHA: ${{ inputs.source-manifest-sha256 }}
+        INPUT_METADATA_JSON: ${{ inputs.metadata-json }}
+        INPUT_OUTPUT_PATH: ${{ inputs.output-path }}
+        INPUT_ENVELOPE_PATH: ${{ inputs.envelope-path }}
+        INPUT_APPEND_PATH: ${{ inputs.append-ndjson-path }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/emit-ci-phase.mjs" `
+          --phase "$env:INPUT_PHASE" --sequence "$env:INPUT_SEQUENCE" --status "$env:INPUT_STATUS" `
+          --started-at "$env:INPUT_STARTED_AT" --completed-at "$env:INPUT_COMPLETED_AT" `
+          --observed-at "$env:INPUT_OBSERVED_AT" --duration-ms "$env:INPUT_DURATION_MS" --unit "$env:INPUT_UNIT" `
+          --job-id "$env:INPUT_JOB_ID" --fingerprint-version "$env:INPUT_FINGERPRINT_VERSION" `
+          --pool-mapping-version "$env:INPUT_POOL_MAPPING_VERSION" --policy-version "$env:INPUT_POLICY_VERSION" `
+          --collector-mode "$env:INPUT_COLLECTOR_MODE" --selected-lane "$env:INPUT_SELECTED_LANE" `
+          --trace-id "$env:INPUT_TRACE_ID" --span-id "$env:INPUT_SPAN_ID" `
+          --parent-span-id "$env:INPUT_PARENT_SPAN_ID" --correlation-quality "$env:INPUT_CORRELATION_QUALITY" `
+          --source-manifest-sha256 "$env:INPUT_SOURCE_MANIFEST_SHA" --metadata-json "$env:INPUT_METADATA_JSON" `
+          --output-path "$env:INPUT_OUTPUT_PATH" --envelope-path "$env:INPUT_ENVELOPE_PATH" `
+          --append-ndjson-path "$env:INPUT_APPEND_PATH" --github-output "$env:GITHUB_OUTPUT"
