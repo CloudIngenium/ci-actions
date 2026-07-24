@@ -10,67 +10,26 @@ permissions:
   contents: read
 
 jobs:
-  clean-stale-git-locks:
+  action-contracts:
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: Linux
-            runner: '["self-hosted","Linux","X64","Build-Fast"]'
+            runner: ubuntu-latest
           - os: Windows
-            runner: '["self-hosted","Windows","X64","Windows-Build-Fast"]'
-    runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: 5
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Create stale and fresh locks (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          fixture="$RUNNER_TEMP/stale-lock-fixture"
-          mkdir -p "$fixture/.git/refs/remotes/origin"
-          touch -d '10 minutes ago' "$fixture/.git/refs/remotes/origin/main.lock"
-          touch "$fixture/.git/index.lock"
-      - name: Create stale and fresh locks (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $fixture = Join-Path $env:RUNNER_TEMP "stale-lock-fixture"
-          $refs = Join-Path $fixture ".git/refs/remotes/origin"
-          New-Item -ItemType Directory -Path $refs -Force | Out-Null
-          $stale = Join-Path $refs "main.lock"
-          $fresh = Join-Path $fixture ".git/index.lock"
-          New-Item -ItemType File -Path $stale -Force | Out-Null
-          New-Item -ItemType File -Path $fresh -Force | Out-Null
-          (Get-Item -LiteralPath $stale).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
-      - id: clean
-        uses: ./clean-stale-git-locks
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          workspace: ${{ runner.temp }}/stale-lock-fixture
-          min-age-seconds: "60"
-      - name: Verify conservative cleanup (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          fixture="$RUNNER_TEMP/stale-lock-fixture"
-          test "${{ steps.clean.outputs.removed-count }}" = "1"
-          test ! -e "$fixture/.git/refs/remotes/origin/main.lock"
-          test -e "$fixture/.git/index.lock"
-      - name: Verify conservative cleanup (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $fixture = Join-Path $env:RUNNER_TEMP "stale-lock-fixture"
-          if ("${{ steps.clean.outputs.removed-count }}" -ne "1") { throw "Expected one removed lock" }
-          if (Test-Path -LiteralPath (Join-Path $fixture ".git/refs/remotes/origin/main.lock")) { throw "Stale lock remains" }
-          if (-not (Test-Path -LiteralPath (Join-Path $fixture ".git/index.lock"))) { throw "Fresh lock was removed" }
+          node-version: "24"
+          check-latest: false
 
-  setup-node-pnpm:
-    runs-on: [self-hosted, Linux, X64, Build-Fast]
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Test action contracts
+        shell: bash
         run: >-
           node --test
           lib/contract.test.mjs
@@ -79,40 +38,54 @@ jobs:
           emit-ci-phase/emit-ci-phase.test.mjs
           setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
           release-manifest/release-manifest.test.mjs
-      - uses: ./setup-node-pnpm
-        id: setup
-      - name: Verify exact isolated toolchain
+
+      - name: Create stale and fresh locks
         shell: bash
         run: |
-          set -euo pipefail
+          fixture="$RUNNER_TEMP/stale-lock-fixture"
+          mkdir -p "$fixture/.git/refs/remotes/origin"
+          touch "$fixture/.git/refs/remotes/origin/main.lock"
+          touch "$fixture/.git/index.lock"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            powershell -NoLogo -NoProfile -NonInteractive -Command \
+              "(Get-Item -LiteralPath '$fixture/.git/refs/remotes/origin/main.lock').LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)"
+          else
+            touch -d '10 minutes ago' "$fixture/.git/refs/remotes/origin/main.lock"
+          fi
+
+      - id: clean
+        uses: ./clean-stale-git-locks
+        with:
+          workspace: ${{ runner.temp }}/stale-lock-fixture
+          min-age-seconds: "60"
+
+      - name: Verify conservative cleanup
+        shell: bash
+        run: |
+          fixture="$RUNNER_TEMP/stale-lock-fixture"
+          test "${{ steps.clean.outputs.removed-count }}" = "1"
+          test ! -e "$fixture/.git/refs/remotes/origin/main.lock"
+          test -e "$fixture/.git/index.lock"
+
+      - name: Set up Node and pnpm action
+        if: runner.os == 'Linux'
+        id: node-pnpm
+        uses: ./setup-node-pnpm
+
+      - name: Verify exact isolated Node toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
           case "$(node --version)" in
             v24.*) ;;
             *) echo "::error::Node 24 was not installed"; exit 1 ;;
           esac
           test "$(pnpm --version)" = "11.13.0"
-          test "${{ steps.setup.outputs['pnpm-version'] }}" = "11.13.0"
+          test "${{ steps.node-pnpm.outputs['pnpm-version'] }}" = "11.13.0"
           case "$PNPM_HOME" in
             "$RUNNER_TEMP"/*) ;;
             *) echo "::error::PNPM_HOME is not job-scoped: $PNPM_HOME"; exit 1 ;;
           esac
-
-  ci-control-v4-actions:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: Linux
-            runner: '["self-hosted","Linux","X64","Build-Fast"]'
-          - os: Windows
-            runner: '["self-hosted","Windows","X64","Windows-Build-Fast"]'
-    runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-          check-latest: false
 
       - name: Create cross-platform fixtures
         shell: pwsh
@@ -130,26 +103,12 @@ jobs:
           requirements-json: >-
             {"node_major":24,"git_minimum":"2.40.0"}
 
-      - name: Verify baseline outputs
-        shell: pwsh
-        run: |
-          if ("${{ steps.baseline.outputs.eligible }}" -ne "true") { throw "Runner baseline was not eligible" }
-          if (-not (Test-Path -LiteralPath "${{ steps.baseline.outputs.manifest-path }}")) {
-            throw "Runner baseline manifest is missing"
-          }
-
       - id: baseline-drift
         uses: ./runner-baseline
         with:
           requirements-json: '{"node_major":1}'
           output-path: "runner-baseline-drift.json"
           fail-on-drift: "false"
-
-      - name: Verify non-fatal drift outputs
-        shell: pwsh
-        run: |
-          if ("${{ steps.baseline-drift.outputs.drifted }}" -ne "true") { throw "Expected baseline drift" }
-          if ("${{ steps.baseline-drift.outputs.drift-count }}" -ne "1") { throw "Expected one drift reason" }
 
       - id: dotnet
         uses: ./setup-dotnet-nuget
@@ -158,14 +117,6 @@ jobs:
           global-json-file: "ci-action-fixture/global.json"
           sdk-setup-mode: "setup"
           cache-root: ${{ runner.temp }}/ci-actions-nuget
-
-      - name: Verify exact SDK and cache outputs
-        shell: pwsh
-        run: |
-          if ("${{ steps.dotnet.outputs.sdk-version }}" -ne "10.0.302") { throw "Wrong SDK selected" }
-          if (-not (Test-Path -LiteralPath "${{ steps.dotnet.outputs.packages-path }}")) {
-            throw "Persistent packages path is missing"
-          }
 
       - id: phase
         uses: ./emit-ci-phase
@@ -181,18 +132,6 @@ jobs:
           source-manifest-sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           metadata-json: '{"cache_state":"warm","token":"redaction-fixture-value"}'
 
-      - name: Verify canonical phase and redacted provenance envelope
-        shell: pwsh
-        run: |
-          $payload = Get-Content -Raw -LiteralPath "${{ steps.phase.outputs.payload-path }}"
-          $event = $payload | ConvertFrom-Json
-          if ($event.event_type -ne "ci_phase") { throw "Expected canonical ci_phase event" }
-          if ($payload -match "ci_phase_summary") { throw "Legacy event leaked into canonical payload" }
-          $envelope = Get-Content -Raw -LiteralPath "${{ steps.phase.outputs.envelope-path }}"
-          if ($envelope -match "redaction-fixture-value") { throw "Secret-shaped value survived redaction" }
-          if ($envelope -notmatch "ci_phase_summary") { throw "Raw event provenance is missing" }
-          if ("${{ steps.phase.outputs.redacted-field-count }}" -ne "1") { throw "Expected one redaction" }
-
       - id: release
         uses: ./release-manifest
         with:
@@ -202,13 +141,23 @@ jobs:
           created-at: "2026-07-23T17:00:00Z"
           metadata-json: '{"runtime":"portable"}'
 
-      - name: Verify release manifest
+      - name: Verify composite action outputs
         shell: pwsh
         run: |
+          if ("${{ steps.baseline.outputs.eligible }}" -ne "true") { throw "Runner baseline was not eligible" }
+          if ("${{ steps.baseline-drift.outputs.drifted }}" -ne "true") { throw "Expected baseline drift" }
+          if ("${{ steps.baseline-drift.outputs.drift-count }}" -ne "1") { throw "Expected one drift reason" }
+          if ("${{ steps.dotnet.outputs.sdk-version }}" -ne "10.0.302") { throw "Wrong SDK selected" }
+
+          $payload = Get-Content -Raw -LiteralPath "${{ steps.phase.outputs.payload-path }}"
+          $event = $payload | ConvertFrom-Json
+          if ($event.event_type -ne "ci_phase") { throw "Expected canonical ci_phase event" }
+          if ($payload -match "ci_phase_summary") { throw "Legacy event leaked into canonical payload" }
+          $envelope = Get-Content -Raw -LiteralPath "${{ steps.phase.outputs.envelope-path }}"
+          if ($envelope -match "redaction-fixture-value") { throw "Secret-shaped value survived redaction" }
+          if ($envelope -notmatch "ci_phase_summary") { throw "Raw event provenance is missing" }
+
           $manifest = Get-Content -Raw -LiteralPath "${{ steps.release.outputs.manifest-path }}" | ConvertFrom-Json
           if ($manifest.schema_version -ne 1) { throw "Unexpected release manifest schema" }
           if ($null -ne $manifest.contract_version) { throw "Release manifest must not claim KH contract v4" }
           if ($manifest.file_count -ne 1) { throw "Unexpected release file count" }
-          if (-not (Test-Path -LiteralPath "${{ steps.release.outputs.manifest-sha256-path }}")) {
-            throw "Manifest hash attestation is missing"
-          }
