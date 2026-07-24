@@ -7,6 +7,7 @@ import path from "node:path";
 
 import {
   assertPlainObject,
+  isDirectExecution,
   parseBoolean,
   parseBoundedJson,
   resolveInside,
@@ -250,7 +251,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`::error::${error.message}\n`);
     process.exitCode = 2;

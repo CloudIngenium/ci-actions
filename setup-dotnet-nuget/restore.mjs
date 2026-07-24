@@ -4,7 +4,12 @@ import { spawn } from "node:child_process";
 import { rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { parseBoolean, resolveInside, stableStringify } from "../lib/contract.mjs";
+import {
+  isDirectExecution,
+  parseBoolean,
+  resolveInside,
+  stableStringify,
+} from "../lib/contract.mjs";
 import { writeOutputs } from "../lib/github-output.mjs";
 
 const MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024;
@@ -137,7 +142,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`::error::${error.message}\n`);
     process.exitCode = 2;

@@ -4,7 +4,12 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { assertSafeRelativePath, parseBoolean, resolveInside } from "../lib/contract.mjs";
+import {
+  assertSafeRelativePath,
+  isDirectExecution,
+  parseBoolean,
+  resolveInside,
+} from "../lib/contract.mjs";
 import { writeOutputs } from "../lib/github-output.mjs";
 
 const EXACT_SDK = /^\d+\.\d+\.\d{3}(?:-[0-9A-Za-z.-]+)?$/;
@@ -154,7 +159,7 @@ async function main() {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`::error::${error.message}\n`);
     process.exitCode = 2;
