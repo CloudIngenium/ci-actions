@@ -1,0 +1,79 @@
+name: Runner baseline manifest and preflight
+description: Record a bounded runner toolchain manifest and fail fast when required capabilities drift.
+
+inputs:
+  requirements-file:
+    description: Optional requirements JSON path relative to the workspace.
+    required: false
+    default: ""
+  requirements-json:
+    description: Bounded JSON requirements merged over requirements-file.
+    required: false
+    default: "{}"
+  output-path:
+    description: Manifest path relative to RUNNER_TEMP.
+    required: false
+    default: "runner-baseline.json"
+  fail-on-drift:
+    description: Fail the preflight when any requirement is not met.
+    required: false
+    default: "true"
+
+outputs:
+  manifest-path:
+    description: Absolute path to the generated baseline manifest.
+    value: ${{ steps.baseline-unix.outputs['manifest-path'] || steps.baseline-windows.outputs['manifest-path'] }}
+  manifest-sha256:
+    description: SHA-256 of the generated manifest.
+    value: ${{ steps.baseline-unix.outputs['manifest-sha256'] || steps.baseline-windows.outputs['manifest-sha256'] }}
+  eligible:
+    description: Whether the runner meets all requirements.
+    value: ${{ steps.baseline-unix.outputs.eligible || steps.baseline-windows.outputs.eligible }}
+  drifted:
+    description: Whether one or more capabilities drifted.
+    value: ${{ steps.baseline-unix.outputs.drifted || steps.baseline-windows.outputs.drifted }}
+  drift-count:
+    description: Number of detected drift reasons.
+    value: ${{ steps.baseline-unix.outputs['drift-count'] || steps.baseline-windows.outputs['drift-count'] }}
+  drift-reasons:
+    description: Bounded JSON array of drift reasons.
+    value: ${{ steps.baseline-unix.outputs['drift-reasons'] || steps.baseline-windows.outputs['drift-reasons'] }}
+
+runs:
+  using: composite
+  steps:
+    - id: baseline-unix
+      name: Record and verify runner baseline
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
+        REQUIREMENTS_JSON: ${{ inputs.requirements-json }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+        FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/runner-baseline.mjs" \
+          --requirements-file "$REQUIREMENTS_FILE" \
+          --requirements-json "$REQUIREMENTS_JSON" \
+          --output-path "$OUTPUT_PATH" \
+          --fail-on-drift "$FAIL_ON_DRIFT" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - id: baseline-windows
+      name: Record and verify runner baseline
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
+        REQUIREMENTS_JSON: ${{ inputs.requirements-json }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+        FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/runner-baseline.mjs" `
+          --requirements-file "$env:REQUIREMENTS_FILE" `
+          --requirements-json "$env:REQUIREMENTS_JSON" `
+          --output-path "$env:OUTPUT_PATH" `
+          --fail-on-drift "$env:FAIL_ON_DRIFT" `
+          --github-output "$env:GITHUB_OUTPUT"

@@ -1,0 +1,92 @@
+name: Create bounded release manifest
+description: Hash a release tree into a deterministic, bounded manifest without following symlinks.
+
+inputs:
+  root:
+    description: Release directory relative to the workspace.
+    required: false
+    default: "."
+  artifact-name:
+    description: Stable artifact identifier.
+    required: true
+  release-sha:
+    description: Git SHA or equivalent 40/64-character hexadecimal release digest.
+    required: false
+    default: ""
+  metadata-json:
+    description: Bounded release metadata object. Secret-looking values are redacted.
+    required: false
+    default: "{}"
+  output-path:
+    description: Manifest path relative to root.
+    required: false
+    default: "release-manifest.json"
+  max-files:
+    description: Maximum number of files accepted from the release tree.
+    required: false
+    default: "20000"
+  created-at:
+    description: Optional RFC 3339 creation time. Defaults to current UTC time.
+    required: false
+    default: ""
+
+outputs:
+  manifest-path:
+    description: Absolute manifest path.
+    value: ${{ steps.manifest-unix.outputs['manifest-path'] || steps.manifest-windows.outputs['manifest-path'] }}
+  manifest-sha256-path:
+    description: Absolute SHA-256 attestation path.
+    value: ${{ steps.manifest-unix.outputs['manifest-sha256-path'] || steps.manifest-windows.outputs['manifest-sha256-path'] }}
+  manifest-sha256:
+    description: SHA-256 of the canonical manifest.
+    value: ${{ steps.manifest-unix.outputs['manifest-sha256'] || steps.manifest-windows.outputs['manifest-sha256'] }}
+  file-count:
+    description: Number of release files.
+    value: ${{ steps.manifest-unix.outputs['file-count'] || steps.manifest-windows.outputs['file-count'] }}
+  total-bytes:
+    description: Total release bytes.
+    value: ${{ steps.manifest-unix.outputs['total-bytes'] || steps.manifest-windows.outputs['total-bytes'] }}
+  redacted-field-count:
+    description: Number of metadata fields or values redacted.
+    value: ${{ steps.manifest-unix.outputs['redacted-field-count'] || steps.manifest-windows.outputs['redacted-field-count'] }}
+
+runs:
+  using: composite
+  steps:
+    - id: manifest-unix
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        INPUT_RELEASE_SHA: ${{ inputs.release-sha || github.sha }}
+        INPUT_METADATA_JSON: ${{ inputs.metadata-json }}
+        INPUT_OUTPUT_PATH: ${{ inputs.output-path }}
+        INPUT_MAX_FILES: ${{ inputs.max-files }}
+        INPUT_CREATED_AT: ${{ inputs.created-at }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/release-manifest.mjs" \
+          --root "$INPUT_ROOT" --artifact-name "$INPUT_ARTIFACT_NAME" \
+          --release-sha "$INPUT_RELEASE_SHA" --metadata-json "$INPUT_METADATA_JSON" \
+          --output-path "$INPUT_OUTPUT_PATH" --max-files "$INPUT_MAX_FILES" \
+          --created-at "$INPUT_CREATED_AT" --github-output "$GITHUB_OUTPUT"
+
+    - id: manifest-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        INPUT_RELEASE_SHA: ${{ inputs.release-sha || github.sha }}
+        INPUT_METADATA_JSON: ${{ inputs.metadata-json }}
+        INPUT_OUTPUT_PATH: ${{ inputs.output-path }}
+        INPUT_MAX_FILES: ${{ inputs.max-files }}
+        INPUT_CREATED_AT: ${{ inputs.created-at }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/release-manifest.mjs" `
+          --root "$env:INPUT_ROOT" --artifact-name "$env:INPUT_ARTIFACT_NAME" `
+          --release-sha "$env:INPUT_RELEASE_SHA" --metadata-json "$env:INPUT_METADATA_JSON" `
+          --output-path "$env:INPUT_OUTPUT_PATH" --max-files "$env:INPUT_MAX_FILES" `
+          --created-at "$env:INPUT_CREATED_AT" --github-output "$env:GITHUB_OUTPUT"

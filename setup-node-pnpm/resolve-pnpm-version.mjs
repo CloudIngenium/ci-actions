@@ -2,6 +2,8 @@
 
 import { readFile } from "node:fs/promises";
 
+import { isDirectExecution } from "../lib/contract.mjs";
+
 const EXACT_STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
 
 function readArguments(argv) {
@@ -45,7 +47,7 @@ export async function resolvePnpmVersion({ explicit = "", manifest, fallback }) 
   return validate(fallback, "fallback");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url)) {
   try {
     const args = readArguments(process.argv.slice(2));
     const version = await resolvePnpmVersion({
