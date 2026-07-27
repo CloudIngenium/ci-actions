@@ -1,0 +1,54 @@
+name: CI admission lease
+description: Acquire a bounded CloudIngenium CI admission lease and release heavy-validation leases automatically.
+
+inputs:
+  token:
+    description: Dedicated CI_ADMISSION_TOKEN bearer secret.
+    required: true
+  kind:
+    description: Admission policy to apply (bot_pr or heavy_validation).
+    required: true
+  subject:
+    description: Stable idempotency subject. Required for bot_pr; defaults to the current job identity for heavy_validation.
+    required: false
+    default: ""
+  repo:
+    description: Exact CloudIngenium owner/repository. Defaults to github.repository.
+    required: false
+    default: ${{ github.repository }}
+  automation-wave-id:
+    description: Optional bounded identifier for an automation wave.
+    required: false
+    default: ""
+  ttl-seconds:
+    description: Optional bounded lease lifetime.
+    required: false
+    default: ""
+  release-on-post:
+    description: auto releases heavy_validation leases; true or false overrides that behavior.
+    required: false
+    default: auto
+  endpoint:
+    description: CI admission API base URL.
+    required: false
+    default: https://gh-hooks.cloudingenium.com
+
+outputs:
+  granted:
+    description: True when admission was granted.
+  reused:
+    description: True when an existing idempotent lease was reused.
+  lease-id:
+    description: Opaque lease UUID.
+  active-count:
+    description: Active count observed after the decision.
+  policy-limit:
+    description: Applied policy limit.
+  retry-after-seconds:
+    description: Bounded retry delay when admission was denied.
+
+runs:
+  using: node20
+  main: index.mjs
+  post: index.mjs
+  post-if: always()

@@ -8,6 +8,30 @@ All new actions use only the Node.js standard library. The Linux paths use
 `bash`; Windows paths use `pwsh`. A Node.js CLI must be available on the runner,
 as it is on GitHub-hosted images and CloudIngenium runner baselines.
 
+## CI admission
+
+Acquire a bounded lease before starting a build-heavy validation:
+
+```yaml
+- name: Admit build-heavy validation
+  uses: CloudIngenium/ci-actions/ci-admission@<full-commit-sha>
+  with:
+    token: ${{ secrets.CI_ADMISSION_TOKEN }}
+    kind: heavy_validation
+    automation-wave-id: ${{ inputs.automation_wave_id }}
+```
+
+The action derives an idempotent subject from the current run, attempt, and
+job. Its post action releases the lease even when a later step fails or is
+cancelled. A denied lease fails before checkout/setup and reports the bounded
+retry interval.
+
+Bot PR producers pass `kind: bot_pr` and the exact future head ref as
+`subject`. Those leases are not released by the post action: the organization
+Worker links them to the `pull_request` webhook and counts the PR until it
+closes. Workflow callers receive only the dedicated `CI_ADMISSION_TOKEN`, never
+the broader gh-hooks query/Copilot token.
+
 ## Detect CI scope
 
 Resolve a bounded three-dot Git diff into canonical changed files, optional
