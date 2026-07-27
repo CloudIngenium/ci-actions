@@ -162,3 +162,20 @@ jobs:
           if ($manifest.schema_version -ne 1) { throw "Unexpected release manifest schema" }
           if ($null -ne $manifest.contract_version) { throw "Release manifest must not claim KH contract v4" }
           if ($manifest.file_count -ne 1) { throw "Unexpected release file count" }
+
+  setup-node-pnpm:
+    name: setup-node-pnpm
+    if: ${{ always() }}
+    needs: action-contracts
+    runs-on: ${{ fromJSON('["self-hosted","Linux","X64","Gate-Fast"]') }}
+    timeout-minutes: 2
+    steps:
+      - name: Enforce action contract result
+        shell: bash
+        env:
+          CONTRACT_RESULT: ${{ needs.action-contracts.result }}
+        run: |
+          if [[ "$CONTRACT_RESULT" != "success" ]]; then
+            echo "::error::Action contract matrix finished with $CONTRACT_RESULT"
+            exit 1
+          fi
