@@ -26,6 +26,19 @@ job. Its post action releases the lease even when a later step fails or is
 cancelled. A denied lease fails before checkout/setup and reports the bounded
 retry interval.
 
+For real fan-out control, acquire in a short `Control-Fast` job with
+`release-on-post: "false"`, pass the `lease-id` output to the heavy job, and
+release it from an `if: always()` step:
+
+```yaml
+- if: always() && needs.admission.outputs.lease_id != ''
+  uses: CloudIngenium/ci-actions/ci-admission@<full-commit-sha>
+  with:
+    operation: release
+    token: ${{ secrets.CI_ADMISSION_TOKEN }}
+    lease-id: ${{ needs.admission.outputs.lease_id }}
+```
+
 Bot PR producers pass `kind: bot_pr` and the exact future head ref as
 `subject`. Those leases are not released by the post action: the organization
 Worker links them to the `pull_request` webhook and counts the PR until it

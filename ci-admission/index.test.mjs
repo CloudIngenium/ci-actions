@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { acquire, release, runAction } from "./index.mjs";
+import { acquire, explicitRelease, release, runAction } from "./index.mjs";
 
 function env(overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-admission-action-"));
@@ -139,6 +139,29 @@ test("post releases a heavy lease and skips a bot lease", async () => {
   assert.equal(result.released, true);
 
   assert.deepEqual(await release({ ...variables, STATE_release_on_post: "false" }), { skipped: true });
+});
+
+test("an upstream control job can hand its lease to an explicit release step", async () => {
+  const variables = env({
+    INPUT_OPERATION: "release",
+    "INPUT_LEASE-ID": "44444444-4444-4444-8444-444444444444",
+  });
+  let releasedBody;
+  const result = await runAction(variables, async (_url, options) => {
+    releasedBody = JSON.parse(options.body);
+    return response(200, {
+      released: true,
+      lease_id: "44444444-4444-4444-8444-444444444444",
+    });
+  });
+  assert.deepEqual(releasedBody, { lease_id: "44444444-4444-4444-8444-444444444444" });
+  assert.equal(result.released, true);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /released=true/);
+
+  await assert.rejects(
+    explicitRelease(env({ "INPUT_LEASE-ID": "not-a-lease" }), async () => response(200, {})),
+    /lease-id must be the UUID/,
+  );
 });
 
 test("rejects non-HTTPS endpoints and broad or multiline workflow values", async () => {
