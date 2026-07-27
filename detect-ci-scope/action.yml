@@ -1,0 +1,55 @@
+name: Detect CI scope
+description: Resolve a bounded Git diff into docs, full-fleet, and changed-component scopes.
+inputs:
+  base-sha:
+    description: Base commit for the three-dot diff.
+    required: false
+  head-sha:
+    description: Head commit for the three-dot diff.
+    required: false
+    default: ${{ github.sha }}
+  component-root:
+    description: Optional directory whose first child segment identifies a component.
+    required: false
+    default: ''
+  full-trigger-paths:
+    description: Newline-delimited exact paths or directory prefixes ending in / or /**.
+    required: false
+    default: ''
+  ignored-paths:
+    description: Newline-delimited exact paths or directory prefixes excluded from runtime scope.
+    required: false
+    default: ''
+  changed-files:
+    description: Test or recovery override; newline-delimited paths instead of git diff.
+    required: false
+    default: ''
+outputs:
+  changed-files-json:
+    description: Canonical sorted changed paths.
+    value: ${{ steps.scope.outputs.changed_files_json }}
+  components-json:
+    description: Canonical sorted changed components below component-root.
+    value: ${{ steps.scope.outputs.components_json }}
+  docs-only:
+    description: True when every changed path is unstructured documentation.
+    value: ${{ steps.scope.outputs.docs_only }}
+  full:
+    description: True when scope cannot be proven or a full-trigger path changed.
+    value: ${{ steps.scope.outputs.full }}
+  reason:
+    description: Bounded explanation for the decision.
+    value: ${{ steps.scope.outputs.reason }}
+runs:
+  using: composite
+  steps:
+    - id: scope
+      shell: bash
+      env:
+        CI_SCOPE_BASE_SHA: ${{ inputs.base-sha }}
+        CI_SCOPE_HEAD_SHA: ${{ inputs.head-sha }}
+        CI_SCOPE_COMPONENT_ROOT: ${{ inputs.component-root }}
+        CI_SCOPE_FULL_TRIGGER_PATHS: ${{ inputs.full-trigger-paths }}
+        CI_SCOPE_IGNORED_PATHS: ${{ inputs.ignored-paths }}
+        CI_SCOPE_CHANGED_FILES: ${{ inputs.changed-files }}
+      run: node "$GITHUB_ACTION_PATH/detect-ci-scope.mjs"

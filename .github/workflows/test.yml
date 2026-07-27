@@ -33,6 +33,7 @@ jobs:
         run: >-
           node --test
           lib/contract.test.mjs
+          detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
           runner-baseline/runner-baseline.test.mjs
           emit-ci-phase/emit-ci-phase.test.mjs
