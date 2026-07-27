@@ -158,14 +158,10 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
   return body;
 }
 
-export async function release(env = process.env, fetchImpl = fetch) {
-  const leaseId = String(env.STATE_lease_id || "").trim();
-  const releaseOnPost = String(env.STATE_release_on_post || "").trim() === "true";
-  if (!leaseId || !releaseOnPost) return { skipped: true };
+async function releaseLease(env, leaseId, endpoint, fetchImpl) {
   const token = input(env, "TOKEN");
   if (!token) throw new Error("token is required to release the CI admission lease");
   workflowCommand("add-mask", token);
-  const endpoint = validateEndpoint(env.STATE_endpoint || input(env, "ENDPOINT"));
   const { response, body } = await requestJson(
     `${endpoint}/v1/ci-admission/release`,
     token,
@@ -178,12 +174,34 @@ export async function release(env = process.env, fetchImpl = fetch) {
   return body;
 }
 
+export async function release(env = process.env, fetchImpl = fetch) {
+  const leaseId = String(env.STATE_lease_id || "").trim();
+  const releaseOnPost = String(env.STATE_release_on_post || "").trim() === "true";
+  if (!leaseId || !releaseOnPost) return { skipped: true };
+  const endpoint = validateEndpoint(env.STATE_endpoint || input(env, "ENDPOINT"));
+  return await releaseLease(env, leaseId, endpoint, fetchImpl);
+}
+
+export async function explicitRelease(env = process.env, fetchImpl = fetch) {
+  const leaseId = input(env, "LEASE-ID");
+  if (!/^[0-9a-f-]{36}$/i.test(leaseId)) {
+    throw new Error("lease-id must be the UUID returned by an acquire operation");
+  }
+  const endpoint = validateEndpoint(input(env, "ENDPOINT"));
+  const result = await releaseLease(env, leaseId, endpoint, fetchImpl);
+  emitOutput(env, "released", true);
+  return result;
+}
+
 export async function runAction(env = process.env, fetchImpl = fetch) {
   const post = env.STATE_is_post === "true";
   if (post) return await release(env, fetchImpl);
   // GitHub passes saved state only to the post process. This marker keeps an
   // acquire failure from being mistaken for a second main invocation.
   saveState(env, "is_post", "true");
+  const operation = input(env, "OPERATION") || "acquire";
+  if (operation === "release") return await explicitRelease(env, fetchImpl);
+  if (operation !== "acquire") throw new Error("operation must be acquire or release");
   return await acquire(env, fetchImpl);
 }
 
