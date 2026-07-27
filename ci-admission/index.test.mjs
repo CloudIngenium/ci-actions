@@ -1,0 +1,157 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { acquire, release, runAction } from "./index.mjs";
+
+function env(overrides = {}) {
+  const root = mkdtempSync(join(tmpdir(), "ci-admission-action-"));
+  return {
+    GITHUB_OUTPUT: join(root, "output"),
+    GITHUB_STATE: join(root, "state"),
+    GITHUB_REPOSITORY: "CloudIngenium/example",
+    GITHUB_RUN_ID: "123",
+    GITHUB_RUN_ATTEMPT: "1",
+    GITHUB_JOB: "build-heavy",
+    INPUT_TOKEN: "narrow-secret",
+    INPUT_KIND: "heavy_validation",
+    INPUT_ENDPOINT: "https://gh-hooks.cloudingenium.com",
+    "INPUT_RELEASE-ON-POST": "auto",
+    ...overrides,
+  };
+}
+
+function response(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+test("acquires a heavy lease, emits outputs, and registers post release state", async () => {
+  const variables = env();
+  let request;
+  const result = await acquire(variables, async (url, options) => {
+    request = { url, options };
+    return response(201, {
+      granted: true,
+      reused: false,
+      lease_id: "11111111-1111-4111-8111-111111111111",
+      active_count: 2,
+      policy_limit: 4,
+      retry_after_seconds: null,
+    });
+  });
+
+  assert.equal(result.granted, true);
+  assert.equal(request.url, "https://gh-hooks.cloudingenium.com/v1/ci-admission/acquire");
+  assert.deepEqual(JSON.parse(request.options.body), {
+    kind: "heavy_validation",
+    repo: "CloudIngenium/example",
+    subject: "123:1:build-heavy",
+    automation_wave_id: null,
+    ttl_seconds: null,
+  });
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /granted=true/);
+  assert.match(readFileSync(variables.GITHUB_STATE, "utf8"), /release_on_post=true/);
+});
+
+test("bot PR requires the future head ref and is not released automatically", async () => {
+  const variables = env({
+    INPUT_KIND: "bot_pr",
+    INPUT_SUBJECT: "automation/deps-123",
+  });
+  await acquire(variables, async () => response(201, {
+    granted: true,
+    reused: false,
+    lease_id: "22222222-2222-4222-8222-222222222222",
+    active_count: 1,
+    policy_limit: 2,
+  }));
+  assert.match(readFileSync(variables.GITHUB_STATE, "utf8"), /release_on_post=false/);
+
+  await assert.rejects(
+    acquire(env({ INPUT_KIND: "bot_pr" }), async () => response(500, {})),
+    /subject is required for bot_pr/,
+  );
+});
+
+test("denial fails closed and exposes the bounded retry", async () => {
+  const variables = env();
+  await assert.rejects(
+    acquire(variables, async () => response(429, {
+      granted: false,
+      reused: false,
+      lease_id: null,
+      active_count: 4,
+      policy_limit: 4,
+      retry_after_seconds: 60,
+    })),
+    /retry after 60s/,
+  );
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /retry-after-seconds=60/);
+});
+
+test("a failed acquire marks the later invocation as post and does not reacquire", async () => {
+  const variables = env();
+  let calls = 0;
+  await assert.rejects(runAction(variables, async () => {
+    calls += 1;
+    return response(429, {
+      granted: false,
+      active_count: 4,
+      policy_limit: 4,
+      retry_after_seconds: 60,
+    });
+  }), /admission denied/);
+  assert.match(readFileSync(variables.GITHUB_STATE, "utf8"), /is_post=true/);
+
+  const postEnv = {
+    ...variables,
+    STATE_is_post: "true",
+    STATE_lease_id: "",
+    STATE_release_on_post: "",
+  };
+  assert.deepEqual(await runAction(postEnv, async () => {
+    calls += 1;
+    throw new Error("post must not acquire");
+  }), { skipped: true });
+  assert.equal(calls, 1);
+});
+
+test("post releases a heavy lease and skips a bot lease", async () => {
+  const variables = env({
+    STATE_lease_id: "33333333-3333-4333-8333-333333333333",
+    STATE_endpoint: "https://gh-hooks.cloudingenium.com",
+    STATE_release_on_post: "true",
+  });
+  let releasedBody;
+  const result = await release(variables, async (_url, options) => {
+    releasedBody = JSON.parse(options.body);
+    return response(200, {
+      released: true,
+      lease_id: "33333333-3333-4333-8333-333333333333",
+    });
+  });
+  assert.deepEqual(releasedBody, { lease_id: "33333333-3333-4333-8333-333333333333" });
+  assert.equal(result.released, true);
+
+  assert.deepEqual(await release({ ...variables, STATE_release_on_post: "false" }), { skipped: true });
+});
+
+test("rejects non-HTTPS endpoints and broad or multiline workflow values", async () => {
+  await assert.rejects(
+    acquire(env({ INPUT_ENDPOINT: "http://example.test" }), async () => response(500, {})),
+    /HTTPS origin/,
+  );
+  await assert.rejects(
+    acquire(env({ INPUT_ENDPOINT: "https://example.test" }), async () => response(500, {})),
+    /trusted origin/,
+  );
+  await assert.rejects(
+    acquire(env({ INPUT_SUBJECT: "unsafe\nsubject" }), async () => response(500, {})),
+    /Unsafe multiline workflow value|acquire failed/,
+  );
+});
