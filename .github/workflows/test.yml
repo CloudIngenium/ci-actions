@@ -33,6 +33,7 @@ jobs:
         run: >-
           node --test
           lib/contract.test.mjs
+          detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
           runner-baseline/runner-baseline.test.mjs
           emit-ci-phase/emit-ci-phase.test.mjs
@@ -161,3 +162,22 @@ jobs:
           if ($manifest.schema_version -ne 1) { throw "Unexpected release manifest schema" }
           if ($null -ne $manifest.contract_version) { throw "Release manifest must not claim KH contract v4" }
           if ($manifest.file_count -ne 1) { throw "Unexpected release file count" }
+
+  setup-node-pnpm:
+    name: setup-node-pnpm
+    if: ${{ always() }}
+    needs: action-contracts
+    # This repository intentionally has no organization self-hosted runner
+    # access. The required aggregate is metadata-only and completes in seconds.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Enforce action contract result
+        shell: bash
+        env:
+          CONTRACT_RESULT: ${{ needs.action-contracts.result }}
+        run: |
+          if [[ "$CONTRACT_RESULT" != "success" ]]; then
+            echo "::error::Action contract matrix finished with $CONTRACT_RESULT"
+            exit 1
+          fi

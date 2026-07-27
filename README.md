@@ -8,6 +8,28 @@ All new actions use only the Node.js standard library. The Linux paths use
 `bash`; Windows paths use `pwsh`. A Node.js CLI must be available on the runner,
 as it is on GitHub-hosted images and CloudIngenium runner baselines.
 
+## Detect CI scope
+
+Resolve a bounded three-dot Git diff into canonical changed files, optional
+component names, docs-only status, and a fail-open full-validation decision:
+
+```yaml
+- id: scope
+  uses: CloudIngenium/ci-actions/detect-ci-scope@<full-commit-sha>
+  with:
+    base-sha: ${{ github.event.pull_request.base.sha }}
+    head-sha: ${{ github.event.pull_request.head.sha }}
+    component-root: mcp-servers
+    full-trigger-paths: |
+      packages/core/**
+      pnpm-lock.yaml
+```
+
+Rules accept only exact paths or directory prefixes. Arbitrary shell and regular
+expressions are deliberately unsupported. Missing commits, a failed diff, an
+empty diff, or an oversized change set returns `full=true` so callers validate
+more, never silently less.
+
 ## Runner baseline
 
 Create a bounded toolchain manifest and fail before an expensive job starts when
