@@ -26,6 +26,12 @@ job. Its post action releases the lease even when a later step fails or is
 cancelled. A denied lease fails before checkout/setup and reports the bounded
 retry interval.
 
+Advisory or scheduled callers may set `on-denied: defer`. A valid capacity
+denial then returns `granted=false`, `deferred=true`, and the retry interval
+without creating a lease or failing the control job. Downstream work must
+require `granted == 'true'`; required checks and deploys retain the default
+`fail` behavior.
+
 For real fan-out control, acquire in a short `Control-Fast` job with
 `release-on-post: "false"`, pass the `lease-id` output to the heavy job, and
 release it from an `if: always()` step:

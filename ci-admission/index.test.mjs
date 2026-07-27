@@ -92,6 +92,39 @@ test("denial fails closed and exposes the bounded retry", async () => {
     /retry after 60s/,
   );
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /retry-after-seconds=60/);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /deferred=false/);
+});
+
+test("advisory caller can defer a valid denial without acquiring a lease", async () => {
+  const variables = env({ "INPUT_ON-DENIED": "defer" });
+  const result = await runAction(variables, async () => response(429, {
+    granted: false,
+    reused: false,
+    lease_id: null,
+    active_count: 4,
+    policy_limit: 4,
+    retry_after_seconds: 75,
+  }));
+
+  assert.equal(result.granted, false);
+  assert.equal(result.deferred, true);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /granted=false/);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /deferred=true/);
+  assert.doesNotMatch(readFileSync(variables.GITHUB_STATE, "utf8"), /lease_id=/);
+});
+
+test("defer mode rejects malformed success responses and invalid configuration", async () => {
+  await assert.rejects(
+    acquire(env({ "INPUT_ON-DENIED": "defer" }), async () => response(200, {
+      granted: false,
+      lease_id: null,
+    })),
+    /acquire failed with HTTP 200/,
+  );
+  await assert.rejects(
+    acquire(env({ "INPUT_ON-DENIED": "skip" }), async () => response(429, {})),
+    /on-denied must be fail or defer/,
+  );
 });
 
 test("a failed acquire marks the later invocation as post and does not reacquire", async () => {

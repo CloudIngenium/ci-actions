@@ -36,6 +36,10 @@ inputs:
     description: auto releases heavy_validation leases; true or false overrides that behavior.
     required: false
     default: auto
+  on-denied:
+    description: fail rejects the job; defer returns granted=false and deferred=true for advisory callers.
+    required: false
+    default: fail
   endpoint:
     description: CI admission API base URL.
     required: false
@@ -54,6 +58,8 @@ outputs:
     description: Applied policy limit.
   retry-after-seconds:
     description: Bounded retry delay when admission was denied.
+  deferred:
+    description: True only when a valid 429 denial was returned with on-denied=defer.
   released:
     description: True when an explicit release operation succeeded.
 

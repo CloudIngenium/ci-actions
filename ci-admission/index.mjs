@@ -54,6 +54,13 @@ function resolveReleaseOnPost(kind, raw) {
   throw new Error("release-on-post must be auto, true, or false");
 }
 
+function resolveDeniedBehavior(raw) {
+  const normalized = raw.toLowerCase();
+  if (!normalized || normalized === "fail") return "fail";
+  if (normalized === "defer") return "defer";
+  throw new Error("on-denied must be fail or defer");
+}
+
 function boundedJson(text) {
   if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES) {
     throw new Error("CI admission response exceeded 32 KiB");
@@ -115,6 +122,7 @@ function acquireInput(env) {
     token,
     endpoint: validateEndpoint(input(env, "ENDPOINT")),
     releaseOnPost: resolveReleaseOnPost(kind, input(env, "RELEASE-ON-POST")),
+    deniedBehavior: resolveDeniedBehavior(input(env, "ON-DENIED")),
     payload: {
       kind,
       repo,
@@ -134,6 +142,8 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
     { method: "POST", body: JSON.stringify(config.payload) },
     fetchImpl,
   );
+  const capacityDenied = response.status === 429 && body.granted === false;
+  const deferred = capacityDenied && config.deniedBehavior === "defer";
 
   for (const [name, value] of Object.entries({
     granted: Boolean(body.granted),
@@ -142,9 +152,18 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
     "active-count": body.active_count ?? "",
     "policy-limit": body.policy_limit ?? "",
     "retry-after-seconds": body.retry_after_seconds ?? "",
+    deferred,
   })) emitOutput(env, name, value);
 
-  if (response.status === 429 || body.granted === false) {
+  if (deferred) {
+    const retry = Number(body.retry_after_seconds || 60);
+    workflowCommand(
+      "notice",
+      `CI admission deferred (${body.active_count}/${body.policy_limit}); retry after ${retry}s`,
+    );
+    return { ...body, deferred: true };
+  }
+  if (response.status === 429) {
     const retry = Number(body.retry_after_seconds || 60);
     throw new Error(`CI admission denied (${body.active_count}/${body.policy_limit}); retry after ${retry}s`);
   }
