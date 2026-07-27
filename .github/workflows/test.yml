@@ -167,7 +167,9 @@ jobs:
     name: setup-node-pnpm
     if: ${{ always() }}
     needs: action-contracts
-    runs-on: ${{ fromJSON('["self-hosted","Linux","X64","Gate-Fast"]') }}
+    # This repository intentionally has no organization self-hosted runner
+    # access. The required aggregate is metadata-only and completes in seconds.
+    runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Enforce action contract result
