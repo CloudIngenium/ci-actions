@@ -19,6 +19,9 @@ Acquire a bounded lease before starting a build-heavy validation:
     token: ${{ secrets.CI_ADMISSION_TOKEN }}
     kind: heavy_validation
     automation-wave-id: ${{ inputs.automation_wave_id }}
+    priority-class: "40"
+    slot-weight: "2"
+    requested-lane: Build-Fast
 ```
 
 The action derives an idempotent subject from the current run, attempt, and
@@ -31,6 +34,14 @@ denial then returns `granted=false`, `deferred=true`, and the retry interval
 without creating a lease or failing the control job. Downstream work must
 require `granted == 'true'`; required checks and deploys retain the default
 `fail` behavior.
+
+Weighted admission preserves compatibility: omitted values use priority `40`
+and weight `1`. Heavy validations may request up to four slots. Required and
+deploy work uses priority `100`, human PR and merge queue work `80`, bot work
+`40`, and nightly/background work `10`. `requested-lane` is a capability label,
+not a runner name. Optional deadlines must be RFC3339 and no more than 24 hours
+ahead. Decision, active-slot, and suggested-wait outputs make deferrals
+observable without exposing branch or job content.
 
 For real fan-out control, acquire in a short `Control-Fast` job with
 `release-on-post: "false"`, pass the `lease-id` output to the heavy job, and

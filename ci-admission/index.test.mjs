@@ -19,6 +19,8 @@ function env(overrides = {}) {
     INPUT_KIND: "heavy_validation",
     INPUT_ENDPOINT: "https://gh-hooks.cloudingenium.com",
     "INPUT_RELEASE-ON-POST": "auto",
+    "INPUT_PRIORITY-CLASS": "40",
+    "INPUT_SLOT-WEIGHT": "1",
     ...overrides,
   };
 }
@@ -40,8 +42,11 @@ test("acquires a heavy lease, emits outputs, and registers post release state", 
       reused: false,
       lease_id: "11111111-1111-4111-8111-111111111111",
       active_count: 2,
+      active_slot_weight: 3,
       policy_limit: 4,
+      decision_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       retry_after_seconds: null,
+      suggested_wait_ms: null,
     });
   });
 
@@ -52,9 +57,15 @@ test("acquires a heavy lease, emits outputs, and registers post release state", 
     repo: "CloudIngenium/example",
     subject: "123:1:build-heavy",
     automation_wave_id: null,
+    priority_class: 40,
+    slot_weight: 1,
+    requested_lane: null,
+    deadline_at: null,
     ttl_seconds: null,
   });
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /granted=true/);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /active-slot-weight=3/);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /decision-id=aaaaaaaa-/);
   assert.match(readFileSync(variables.GITHUB_STATE, "utf8"), /release_on_post=true/);
 });
 
@@ -93,6 +104,63 @@ test("denial fails closed and exposes the bounded retry", async () => {
   );
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /retry-after-seconds=60/);
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /deferred=false/);
+});
+
+test("sends bounded priority, weight, lane, wave, and deadline", async () => {
+  const variables = env({
+    "INPUT_PRIORITY-CLASS": "80",
+    "INPUT_SLOT-WEIGHT": "2",
+    "INPUT_REQUESTED-LANE": "Build-Fast",
+    "INPUT_AUTOMATION-WAVE-ID": "deps-2026-07-27",
+    "INPUT_DEADLINE-AT": new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  });
+  let requestBody;
+  await acquire(variables, async (_url, options) => {
+    requestBody = JSON.parse(options.body);
+    return response(201, {
+      granted: true,
+      reused: false,
+      lease_id: "55555555-5555-4555-8555-555555555555",
+      active_count: 1,
+      active_slot_weight: 2,
+      policy_limit: 4,
+      decision_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+  });
+  assert.equal(requestBody.priority_class, 80);
+  assert.equal(requestBody.slot_weight, 2);
+  assert.equal(requestBody.requested_lane, "Build-Fast");
+  assert.equal(requestBody.automation_wave_id, "deps-2026-07-27");
+  assert.match(requestBody.deadline_at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("rejects invalid weighted scheduling inputs before calling the API", async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return response(500, {});
+  };
+  await assert.rejects(
+    acquire(env({ "INPUT_PRIORITY-CLASS": "101" }), fetchImpl),
+    /priority-class must be an integer from 1 to 100/,
+  );
+  await assert.rejects(
+    acquire(env({ "INPUT_SLOT-WEIGHT": "5" }), fetchImpl),
+    /slot-weight must be an integer from 1 to 4/,
+  );
+  await assert.rejects(
+    acquire(env({ INPUT_KIND: "bot_pr", INPUT_SUBJECT: "automation/a", "INPUT_SLOT-WEIGHT": "2" }), fetchImpl),
+    /bot_pr slot-weight must be 1/,
+  );
+  await assert.rejects(
+    acquire(env({ "INPUT_REQUESTED-LANE": "Build Fast" }), fetchImpl),
+    /requested-lane must be a bounded capability identifier/,
+  );
+  await assert.rejects(
+    acquire(env({ "INPUT_DEADLINE-AT": "not-a-date" }), fetchImpl),
+    /deadline-at must be an RFC3339 timestamp within the next 24 hours/,
+  );
+  assert.equal(calls, 0);
 });
 
 test("advisory caller can defer a valid denial without acquiring a lease", async () => {

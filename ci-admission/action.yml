@@ -28,6 +28,22 @@ inputs:
     description: Optional bounded identifier for an automation wave.
     required: false
     default: ""
+  priority-class:
+    description: Bounded scheduling priority from 1 to 100. Required/deploy callers use 100; human PRs 80; bots 40; background 10.
+    required: false
+    default: "40"
+  slot-weight:
+    description: Heavy-validation capacity weight from 1 to 4. bot_pr must remain 1.
+    required: false
+    default: "1"
+  requested-lane:
+    description: Optional bounded capability lane used for admission evidence.
+    required: false
+    default: ""
+  deadline-at:
+    description: Optional RFC3339 deadline within the next 24 hours.
+    required: false
+    default: ""
   ttl-seconds:
     description: Optional bounded lease lifetime.
     required: false
@@ -54,8 +70,14 @@ outputs:
     description: Opaque lease UUID.
   active-count:
     description: Active count observed after the decision.
+  active-slot-weight:
+    description: Active weighted capacity observed after the decision.
   policy-limit:
     description: Applied policy limit.
+  decision-id:
+    description: Opaque identifier for the admission decision.
+  suggested-wait-ms:
+    description: Bounded defer delay in milliseconds.
   retry-after-seconds:
     description: Bounded retry delay when admission was denied.
   deferred:
