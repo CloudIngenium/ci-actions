@@ -1,0 +1,94 @@
+name: Socket Security
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner labels as a JSON array"
+        type: string
+        default: '["self-hosted", "Linux", "X64", "Admin-Short"]'
+      node-version:
+        description: "Node.js major used by the Socket CLI"
+        type: string
+        default: "24"
+      socket-cli-version:
+        description: "Exact stable version of the Socket CLI"
+        type: string
+        default: "1.1.146"
+      blocking:
+        description: "Fail the job when Socket reports a policy violation"
+        type: boolean
+        default: false
+    secrets:
+      SOCKET_SECURITY_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  socket-scan:
+    name: Socket.dev Supply Chain Scan
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 10
+    env:
+      SOCKET_CLI_API_TOKEN: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+      SOCKET_CLI_VERSION: ${{ inputs.socket-cli-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          check-latest: false
+
+      - name: Isolate Socket npm cache
+        shell: bash
+        run: >-
+          echo
+          "NPM_CONFIG_CACHE=$RUNNER_TEMP/socket-npm-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          >> "$GITHUB_ENV"
+
+      - name: Validate Socket CLI version
+        shell: bash
+        run: |
+          if [[ ! "$SOCKET_CLI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::socket-cli-version must be an exact stable semantic version"
+            exit 1
+          fi
+
+      - name: Discover Socket organization slug
+        id: socket-org
+        continue-on-error: true
+        shell: bash
+        run: |
+          slug="$(
+            npx --yes "socket@${SOCKET_CLI_VERSION}" organization list \
+              --json --no-banner --no-spinner 2>/dev/null \
+              | jq -r 'first(.. | objects | .slug? // empty)' || true
+          )"
+          if [[ -n "${slug:-}" && "$slug" != "null" ]]; then
+            echo "Discovered Socket organization slug: $slug"
+            echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          else
+            echo "Socket organization slug discovery unavailable; using CLI auto-detection"
+            echo "slug=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure Socket organization
+        if: steps.socket-org.outputs.slug != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          SLUG: ${{ steps.socket-org.outputs.slug }}
+        run: >-
+          npx --yes "socket@${SOCKET_CLI_VERSION}" config set defaultOrg
+          "$SLUG" --no-banner --no-spinner
+
+      - name: Socket.dev scan
+        continue-on-error: ${{ inputs.blocking != true }}
+        shell: bash
+        env:
+          SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+          SOCKET_CLI_ORG_SLUG: ${{ steps.socket-org.outputs.slug }}
+        run: npx --yes "socket@${SOCKET_CLI_VERSION}" ci --no-interactive
