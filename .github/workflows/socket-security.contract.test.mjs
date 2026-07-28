@@ -5,7 +5,7 @@ import test from "node:test";
 const workflow = readFileSync(
   new URL("./socket-security.yml", import.meta.url),
   "utf8",
-);
+).replaceAll("\r\n", "\n");
 
 test("Socket is reusable across repository visibility boundaries", () => {
   assert.match(workflow, /\n  workflow_call:\n/);
