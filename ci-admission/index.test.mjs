@@ -6,6 +6,12 @@ import { test } from "node:test";
 
 import { acquire, explicitRelease, release, runAction } from "./index.mjs";
 
+test("declares the supported Node 24 action runtime", () => {
+  const metadata = readFileSync(new URL("./action.yml", import.meta.url), "utf8");
+  assert.match(metadata, /\n\s*using:\s*node24\s*\n/);
+  assert.doesNotMatch(metadata, /\n\s*using:\s*node20\s*\n/);
+});
+
 function env(overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-admission-action-"));
   return {

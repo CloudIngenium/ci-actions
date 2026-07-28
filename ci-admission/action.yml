@@ -86,7 +86,7 @@ outputs:
     description: True when an explicit release operation succeeded.
 
 runs:
-  using: node20
+  using: node24
   main: index.mjs
   post: index.mjs
   post-if: always()
