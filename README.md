@@ -266,6 +266,30 @@ npm cache state is isolated below `RUNNER_TEMP`, and callers may override the
 runner or version only with explicit inputs. Keep the workflow pinned to a full
 commit SHA; use the organization security gate to promote a newer CLI version.
 
+## Reusable Dependabot auto-merge workflow
+
+Repositories of any visibility can call the public reusable workflow from a
+minimal `pull_request_target` caller:
+
+```yaml
+name: Dependabot Auto-Merge
+on:
+  pull_request_target:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  dependabot-auto-merge:
+    uses: CloudIngenium/ci-actions/.github/workflows/dependabot-auto-merge.yml@<full-commit-sha>
+```
+
+The reusable job runs only for `dependabot[bot]` pull requests. It reads
+Dependabot's SHA-pinned metadata action, optionally approves the PR when the
+caller permits workflow approvals, and arms patch/minor updates for squash
+auto-merge. Major updates remain unapproved and unarmed. The default
+`Admin-Short` lane keeps this metadata-only operation out of the build pool;
+callers may supply an explicit runner-label JSON array when necessary.
+
 ## Security and compatibility
 
 - The repository contains no credentials or organization-private configuration.

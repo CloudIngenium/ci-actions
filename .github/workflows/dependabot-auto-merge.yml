@@ -1,0 +1,42 @@
+name: Dependabot Auto-Merge
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: JSON array of runner labels for the metadata and merge job.
+        type: string
+        default: '["self-hosted","Linux","X64","Admin-Short"]'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot-auto-merge:
+    if: github.actor == 'dependabot[bot]' && github.event_name == 'pull_request_target'
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 5
+    steps:
+      - name: Read Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Approve patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        continue-on-error: true
+        env:
+          GH_PROMPT_DISABLED: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr review --approve "$PR_URL"
+
+      - name: Arm patch and minor updates for squash merge
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_PROMPT_DISABLED: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
