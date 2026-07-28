@@ -61,6 +61,33 @@ function resolveDeniedBehavior(raw) {
   throw new Error("on-denied must be fail or defer");
 }
 
+function boundedInteger(raw, name, minimum, maximum, defaultValue) {
+  if (!raw) return defaultValue;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer from ${minimum} to ${maximum}`);
+  }
+  return value;
+}
+
+function requestedLane(raw) {
+  if (!raw) return null;
+  if (!/^[A-Za-z0-9._:-]{1,64}$/.test(raw)) {
+    throw new Error("requested-lane must be a bounded capability identifier");
+  }
+  return raw;
+}
+
+function deadlineAt(raw, now = new Date()) {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  const maximum = now.getTime() + 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= now.getTime() || parsed.getTime() > maximum) {
+    throw new Error("deadline-at must be an RFC3339 timestamp within the next 24 hours");
+  }
+  return parsed.toISOString();
+}
+
 function boundedJson(text) {
   if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES) {
     throw new Error("CI admission response exceeded 32 KiB");
@@ -118,6 +145,11 @@ function acquireInput(env) {
   if (ttlRaw && (!Number.isSafeInteger(ttl) || ttl < 1)) {
     throw new Error("ttl-seconds must be a positive integer");
   }
+  const priorityClass = boundedInteger(input(env, "PRIORITY-CLASS"), "priority-class", 1, 100, 40);
+  const slotWeight = boundedInteger(input(env, "SLOT-WEIGHT"), "slot-weight", 1, 4, 1);
+  if (kind === "bot_pr" && slotWeight !== 1) {
+    throw new Error("bot_pr slot-weight must be 1");
+  }
   return {
     token,
     endpoint: validateEndpoint(input(env, "ENDPOINT")),
@@ -128,6 +160,10 @@ function acquireInput(env) {
       repo,
       subject,
       automation_wave_id: input(env, "AUTOMATION-WAVE-ID") || null,
+      priority_class: priorityClass,
+      slot_weight: slotWeight,
+      requested_lane: requestedLane(input(env, "REQUESTED-LANE")),
+      deadline_at: deadlineAt(input(env, "DEADLINE-AT")),
       ttl_seconds: ttl,
     },
   };
@@ -150,8 +186,11 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
     reused: Boolean(body.reused),
     "lease-id": body.lease_id || "",
     "active-count": body.active_count ?? "",
+    "active-slot-weight": body.active_slot_weight ?? "",
     "policy-limit": body.policy_limit ?? "",
+    "decision-id": body.decision_id || "",
     "retry-after-seconds": body.retry_after_seconds ?? "",
+    "suggested-wait-ms": body.suggested_wait_ms ?? "",
     deferred,
   })) emitOutput(env, name, value);
 
@@ -159,13 +198,15 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
     const retry = Number(body.retry_after_seconds || 60);
     workflowCommand(
       "notice",
-      `CI admission deferred (${body.active_count}/${body.policy_limit}); retry after ${retry}s`,
+      `CI admission deferred (${body.active_slot_weight ?? body.active_count}/${body.policy_limit} slots); retry after ${retry}s`,
     );
     return { ...body, deferred: true };
   }
   if (response.status === 429) {
     const retry = Number(body.retry_after_seconds || 60);
-    throw new Error(`CI admission denied (${body.active_count}/${body.policy_limit}); retry after ${retry}s`);
+    throw new Error(
+      `CI admission denied (${body.active_slot_weight ?? body.active_count}/${body.policy_limit} slots); retry after ${retry}s`,
+    );
   }
   if (!response.ok || body.granted !== true || !body.lease_id) {
     throw new Error(`CI admission acquire failed with HTTP ${response.status}`);
