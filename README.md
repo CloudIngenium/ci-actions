@@ -246,10 +246,31 @@ Only lock files older than five minutes are eligible. A lock reported as open
 by `lsof` or Linux `fuser` is preserved. The action does not reset the working
 tree, remove untracked files, or touch Git objects.
 
+## Reusable Socket security workflow
+
+Repositories of any visibility can call the public reusable workflow while
+keeping their Socket token in the caller:
+
+```yaml
+jobs:
+  socket:
+    uses: CloudIngenium/ci-actions/.github/workflows/socket-security.yml@<full-commit-sha>
+    with:
+      blocking: true
+    secrets: inherit
+```
+
+The default runner is the short administration lane and Node 24 is configured
+before the CLI runs. The Socket CLI version is an exact stable release, mutable
+npm cache state is isolated below `RUNNER_TEMP`, and callers may override the
+runner or version only with explicit inputs. Keep the workflow pinned to a full
+commit SHA; use the organization security gate to promote a newer CLI version.
+
 ## Security and compatibility
 
 - The repository contains no credentials or organization-private configuration.
 - Upstream actions are pinned to full commit SHAs.
+- Reusable workflows receive credentials only from the caller.
 - User-provided paths are rooted and traversal-checked before access.
 - JSON contracts are bounded and reject unsupported fields or types.
 - Generated files use deterministic ordering and SHA-256 attestations.
