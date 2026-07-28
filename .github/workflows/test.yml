@@ -40,6 +40,7 @@ jobs:
           emit-ci-phase/emit-ci-phase.test.mjs
           setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
           release-manifest/release-manifest.test.mjs
+          .github/workflows/dependabot-auto-merge.contract.test.mjs
           .github/workflows/socket-security.contract.test.mjs
 
       - name: Create stale and fresh locks
