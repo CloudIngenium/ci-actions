@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { acquire, explicitRelease, release, runAction } from "./index.mjs";
+import {
+  acquire,
+  explicitRelease,
+  prequeueDefer,
+  prequeueStatus,
+  release,
+  runAction,
+} from "./index.mjs";
 
 test("declares the supported Node 24 action runtime", () => {
   const metadata = readFileSync(new URL("./action.yml", import.meta.url), "utf8");
@@ -185,6 +192,97 @@ test("advisory caller can defer a valid denial without acquiring a lease", async
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /granted=false/);
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /deferred=true/);
   assert.doesNotMatch(readFileSync(variables.GITHUB_STATE, "utf8"), /lease_id=/);
+});
+
+test("prequeue defer sends only the typed allowlisted payload", async () => {
+  const variables = env({
+    INPUT_OPERATION: "prequeue-defer",
+    "INPUT_EVENT-TYPE": "validate-skills-full",
+    "INPUT_SOURCE-DIGEST": `sha256:${"b".repeat(64)}`,
+    "INPUT_SOURCE-SHA": "a".repeat(40),
+    INPUT_SCOPE: "nightly",
+    "INPUT_REQUESTED-LANE": "Background",
+    "INPUT_PRIORITY-CLASS": "10",
+    "INPUT_AUTOMATION-WAVE-ID": "skills-2026-08-03",
+  });
+  let request;
+  const result = await prequeueDefer(variables, async (url, options) => {
+    request = { url, options };
+    return response(202, {
+      dispatch_id: "66666666-6666-4666-8666-666666666666",
+      status: "pending",
+      reused: false,
+    });
+  });
+
+  assert.equal(result.status, "pending");
+  assert.equal(request.url, "https://gh-hooks.cloudingenium.com/v1/ci-admission/defer");
+  assert.deepEqual(JSON.parse(request.options.body), {
+    repository: "CloudIngenium/example",
+    event_type: "validate-skills-full",
+    source_digest: `sha256:${"b".repeat(64)}`,
+    client_payload: { source_sha: "a".repeat(40), scope: "nightly" },
+    priority_class: 10,
+    slot_weight: 1,
+    requested_lane: "Background",
+    automation_wave_id: "skills-2026-08-03",
+    deadline_at: null,
+  });
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /dispatch-id=66666666-/);
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /dispatch-status=pending/);
+});
+
+test("prequeue status uses the same bounded transport", async () => {
+  const dispatchId = "77777777-7777-4777-8777-777777777777";
+  const variables = env({ "INPUT_DISPATCH-ID": dispatchId });
+  let request;
+  const result = await prequeueStatus(variables, async (url, options) => {
+    request = { url, options };
+    return response(200, { dispatch_id: dispatchId, status: "dispatched" });
+  });
+  assert.equal(result.status, "dispatched");
+  assert.equal(request.url, `https://gh-hooks.cloudingenium.com/v1/ci-admission/deferred/${dispatchId}`);
+  assert.equal(request.options.method, "GET");
+  assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /dispatch-status=dispatched/);
+});
+
+test("prequeue rejects arbitrary event shapes and required priority classes before transport", async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return response(500, {});
+  };
+  await assert.rejects(prequeueDefer(env({
+    "INPUT_EVENT-TYPE": "shell",
+    "INPUT_SOURCE-DIGEST": "sha256:unsafe",
+  }), fetchImpl), /event-type is not allowlisted/);
+  await assert.rejects(prequeueDefer(env({
+    "INPUT_EVENT-TYPE": "validate-plugins-full",
+    "INPUT_SOURCE-DIGEST": "sha256:plugins",
+    "INPUT_SOURCE-SHA": "abc123",
+    INPUT_SCOPE: "nightly",
+  }), fetchImpl), /source-sha must be a full Git object id/);
+  await assert.rejects(prequeueDefer(env({
+    "INPUT_EVENT-TYPE": "validate-plugins-full",
+    "INPUT_SOURCE-DIGEST": "sha256:plugins",
+    "INPUT_SOURCE-SHA": "a".repeat(40),
+    INPUT_SCOPE: "nightly",
+    "INPUT_PRIORITY-CLASS": "80",
+  }), fetchImpl), /priority-class must be an integer from 1 to 79/);
+  assert.equal(calls, 0);
+});
+
+test("runAction keeps job-level and prequeue operations explicit", async () => {
+  const variables = env({
+    INPUT_OPERATION: "prequeue-status",
+    "INPUT_DISPATCH-ID": "88888888-8888-4888-8888-888888888888",
+  });
+  const result = await runAction(variables, async () => response(200, {
+    dispatch_id: "88888888-8888-4888-8888-888888888888",
+    status: "completed",
+  }));
+  assert.equal(result.status, "completed");
+  assert.match(readFileSync(variables.GITHUB_STATE, "utf8"), /is_post=true/);
 });
 
 test("defer mode rejects malformed success responses and invalid configuration", async () => {
