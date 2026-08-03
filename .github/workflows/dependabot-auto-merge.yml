@@ -4,9 +4,9 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: JSON array of runner labels for the metadata and merge job.
+        description: JSON array used only by the recovery workflow; normal auto-merge is serverless.
         type: string
-        default: '["self-hosted","Linux","X64","Admin-Short"]'
+        default: '["self-hosted","Linux","X64","Admin-Batch"]'
 
 permissions:
   contents: write

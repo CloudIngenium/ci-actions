@@ -39,4 +39,6 @@ test("Socket isolates mutable state and preserves the blocking contract", () => 
     /continue-on-error: \$\{\{ inputs\.blocking != true \}\}/,
   );
   assert.match(workflow, /timeout-minutes: 10/);
+  assert.match(workflow, /default: '\["self-hosted", "Linux", "X64", "Background"\]'/);
+  assert.doesNotMatch(workflow, /Admin-Short/);
 });

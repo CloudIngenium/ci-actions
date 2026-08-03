@@ -16,7 +16,8 @@ test("Dependabot auto-merge is reusable across repository visibility boundaries"
 });
 
 test("Dependabot auto-merge uses a lightweight bounded runner contract", () => {
-  assert.match(workflow, /default: '\["self-hosted","Linux","X64","Admin-Short"\]'/);
+  assert.match(workflow, /default: '\["self-hosted","Linux","X64","Admin-Batch"\]'/);
+  assert.doesNotMatch(workflow, /Admin-Short/);
   assert.match(workflow, /runs-on: \$\{\{ fromJSON\(inputs\.runner\) \}\}/);
   assert.match(workflow, /timeout-minutes: 5/);
 });

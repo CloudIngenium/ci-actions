@@ -4,9 +4,9 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: "Runner labels as a JSON array"
+        description: "Runner labels as a JSON array. Advisory scans default to Background."
         type: string
-        default: '["self-hosted", "Linux", "X64", "Admin-Short"]'
+        default: '["self-hosted", "Linux", "X64", "Background"]'
       node-version:
         description: "Node.js major used by the Socket CLI"
         type: string
