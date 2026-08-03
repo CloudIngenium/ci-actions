@@ -4,6 +4,13 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_ENDPOINT = "https://gh-hooks.cloudingenium.com";
 const MAX_RESPONSE_BYTES = 32 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
+const PREQUEUE_EVENT_TYPES = new Set([
+  "fleet-currency-incremental",
+  "package-source-published",
+  "zap-coverage-deferred",
+  "validate-skills-full",
+  "validate-plugins-full",
+]);
 
 function input(env, name) {
   return String(env[`INPUT_${name.toUpperCase().replaceAll(" ", "_")}`] || "").trim();
@@ -88,6 +95,42 @@ function deadlineAt(raw, now = new Date()) {
   return parsed.toISOString();
 }
 
+function exactRepository(raw, name = "repo") {
+  if (!/^CloudIngenium\/[A-Za-z0-9._-]{1,100}$/.test(raw)) {
+    throw new Error(`${name} must be an exact CloudIngenium repository`);
+  }
+  return raw;
+}
+
+function boundedIdentifier(raw, name, maximum = 120) {
+  if (!raw || raw.length > maximum || !/^[A-Za-z0-9._:/@+-]+$/.test(raw)) {
+    throw new Error(`${name} must be a bounded identifier`);
+  }
+  return raw;
+}
+
+function fullGitObjectId(raw) {
+  if (!/^[0-9a-f]{40,64}$/i.test(raw)) {
+    throw new Error("source-sha must be a full Git object id");
+  }
+  return raw.toLowerCase();
+}
+
+function validationScope(raw, name) {
+  if (raw !== "full" && raw !== "nightly") {
+    throw new Error(`${name} must be full or nightly`);
+  }
+  return raw;
+}
+
+function repositories(raw) {
+  const values = raw.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
+  if (values.length < 1 || values.length > 50) {
+    throw new Error("repositories must contain 1-50 repositories");
+  }
+  return values.map((value) => exactRepository(value, "repositories entry"));
+}
+
 function boundedJson(text) {
   if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES) {
     throw new Error("CI admission response exceeded 32 KiB");
@@ -127,10 +170,7 @@ function acquireInput(env) {
   if (kind !== "bot_pr" && kind !== "heavy_validation") {
     throw new Error("kind must be bot_pr or heavy_validation");
   }
-  const repo = input(env, "REPO") || env.GITHUB_REPOSITORY || "";
-  if (!/^CloudIngenium\/[A-Za-z0-9._-]{1,100}$/.test(repo)) {
-    throw new Error("repo must be an exact CloudIngenium repository");
-  }
+  const repo = exactRepository(input(env, "REPO") || env.GITHUB_REPOSITORY || "");
   let subject = input(env, "SUBJECT");
   if (!subject && kind === "heavy_validation") {
     subject = [env.GITHUB_RUN_ID, env.GITHUB_RUN_ATTEMPT, env.GITHUB_JOB].filter(Boolean).join(":");
@@ -167,6 +207,91 @@ function acquireInput(env) {
       ttl_seconds: ttl,
     },
   };
+}
+
+function prequeueInput(env) {
+  const token = input(env, "TOKEN");
+  if (!token) throw new Error("token is required");
+  const eventType = input(env, "EVENT-TYPE");
+  if (!PREQUEUE_EVENT_TYPES.has(eventType)) {
+    throw new Error("event-type is not allowlisted for prequeue admission");
+  }
+  const repo = exactRepository(input(env, "REPO") || env.GITHUB_REPOSITORY || "");
+  const sourceDigest = boundedIdentifier(input(env, "SOURCE-DIGEST"), "source-digest", 128);
+  const waveInput = input(env, "AUTOMATION-WAVE-ID");
+  const payload = {};
+  if (eventType === "fleet-currency-incremental") {
+    payload.repositories = repositories(input(env, "REPOSITORIES"));
+  } else if (eventType === "package-source-published") {
+    payload.package_name = boundedIdentifier(input(env, "PACKAGE-NAME"), "package-name");
+    payload.package_version = boundedIdentifier(input(env, "PACKAGE-VERSION"), "package-version");
+  } else {
+    payload.source_sha = fullGitObjectId(input(env, "SOURCE-SHA"));
+    if (eventType === "zap-coverage-deferred") {
+      payload.mode = validationScope(input(env, "MODE"), "mode");
+    } else {
+      payload.scope = validationScope(input(env, "SCOPE"), "scope");
+    }
+  }
+  return {
+    token,
+    endpoint: validateEndpoint(input(env, "ENDPOINT")),
+    payload: {
+      repository: repo,
+      event_type: eventType,
+      source_digest: sourceDigest,
+      client_payload: payload,
+      priority_class: boundedInteger(input(env, "PRIORITY-CLASS"), "priority-class", 1, 79, 10),
+      slot_weight: boundedInteger(input(env, "SLOT-WEIGHT"), "slot-weight", 1, 4, 1),
+      requested_lane: requestedLane(input(env, "REQUESTED-LANE")) || "Background",
+      automation_wave_id: waveInput ? boundedIdentifier(waveInput, "automation-wave-id", 96) : null,
+      deadline_at: deadlineAt(input(env, "DEADLINE-AT")),
+    },
+  };
+}
+
+function emitPrequeueOutputs(env, body) {
+  emitOutput(env, "dispatch-id", body.dispatch_id || "");
+  emitOutput(env, "dispatch-status", body.status || "");
+  emitOutput(env, "reused", Boolean(body.reused));
+}
+
+export async function prequeueDefer(env = process.env, fetchImpl = fetch) {
+  const config = prequeueInput(env);
+  workflowCommand("add-mask", config.token);
+  const { response, body } = await requestJson(
+    `${config.endpoint}/v1/ci-admission/defer`,
+    config.token,
+    { method: "POST", body: JSON.stringify(config.payload) },
+    fetchImpl,
+  );
+  if ((response.status !== 200 && response.status !== 202) || !body.dispatch_id || !body.status) {
+    throw new Error(`CI prequeue defer failed with HTTP ${response.status}`);
+  }
+  emitPrequeueOutputs(env, body);
+  return body;
+}
+
+export async function prequeueStatus(env = process.env, fetchImpl = fetch) {
+  const token = input(env, "TOKEN");
+  if (!token) throw new Error("token is required");
+  const dispatchId = input(env, "DISPATCH-ID");
+  if (!/^[0-9a-f-]{36}$/i.test(dispatchId)) {
+    throw new Error("dispatch-id must be the UUID returned by prequeue-defer");
+  }
+  const endpoint = validateEndpoint(input(env, "ENDPOINT"));
+  workflowCommand("add-mask", token);
+  const { response, body } = await requestJson(
+    `${endpoint}/v1/ci-admission/deferred/${dispatchId}`,
+    token,
+    { method: "GET" },
+    fetchImpl,
+  );
+  if (!response.ok || body.dispatch_id !== dispatchId || !body.status) {
+    throw new Error(`CI prequeue status failed with HTTP ${response.status}`);
+  }
+  emitPrequeueOutputs(env, body);
+  return body;
 }
 
 export async function acquire(env = process.env, fetchImpl = fetch) {
@@ -260,8 +385,12 @@ export async function runAction(env = process.env, fetchImpl = fetch) {
   // acquire failure from being mistaken for a second main invocation.
   saveState(env, "is_post", "true");
   const operation = input(env, "OPERATION") || "acquire";
-  if (operation === "release") return await explicitRelease(env, fetchImpl);
-  if (operation !== "acquire") throw new Error("operation must be acquire or release");
+  if (operation === "release" || operation === "job-release") return await explicitRelease(env, fetchImpl);
+  if (operation === "prequeue-defer") return await prequeueDefer(env, fetchImpl);
+  if (operation === "prequeue-status") return await prequeueStatus(env, fetchImpl);
+  if (operation !== "acquire" && operation !== "job-acquire") {
+    throw new Error("operation must be job-acquire, job-release, prequeue-defer, or prequeue-status");
+  }
   return await acquire(env, fetchImpl);
 }
 

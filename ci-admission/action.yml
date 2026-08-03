@@ -1,23 +1,28 @@
-name: CI admission lease
-description: Acquire a bounded CloudIngenium CI admission lease and release heavy-validation leases automatically.
+name: CI admission control
+description: Manage job-level leases or submit typed advisory work for admission before GitHub creates a workflow.
 
 inputs:
   operation:
-    description: Acquire a lease or release a lease from an upstream control job.
+    description: Job-level acquire/release, or prequeue-defer/prequeue-status. acquire/release remain compatibility aliases.
     required: false
     default: acquire
   token:
     description: Dedicated CI_ADMISSION_TOKEN bearer secret.
     required: true
   kind:
-    description: Admission policy to apply (bot_pr or heavy_validation).
-    required: true
+    description: Job-level admission policy (bot_pr or heavy_validation). Not used by prequeue operations.
+    required: false
+    default: ""
   subject:
     description: Stable idempotency subject. Required for bot_pr; defaults to the current job identity for heavy_validation.
     required: false
     default: ""
   lease-id:
     description: Opaque lease UUID required when operation is release.
+    required: false
+    default: ""
+  dispatch-id:
+    description: Opaque deferred dispatch UUID required by prequeue-status.
     required: false
     default: ""
   repo:
@@ -29,9 +34,9 @@ inputs:
     required: false
     default: ""
   priority-class:
-    description: Bounded scheduling priority from 1 to 100. Required/deploy callers use 100; human PRs 80; bots 40; background 10.
+    description: Bounded priority. Job-level defaults to 40; prequeue advisory defaults to 10.
     required: false
-    default: "40"
+    default: ""
   slot-weight:
     description: Heavy-validation capacity weight from 1 to 4. bot_pr must remain 1.
     required: false
@@ -60,6 +65,38 @@ inputs:
     description: CI admission API base URL.
     required: false
     default: https://gh-hooks.cloudingenium.com
+  event-type:
+    description: Allowlisted advisory event used by prequeue-defer.
+    required: false
+    default: ""
+  source-digest:
+    description: Stable content identity used for repository+event idempotency.
+    required: false
+    default: ""
+  source-sha:
+    description: Full Git object id for Skills, Plugins, or Zap coverage events.
+    required: false
+    default: ""
+  scope:
+    description: Full validation scope (full or nightly).
+    required: false
+    default: ""
+  mode:
+    description: Zap coverage mode (full or nightly).
+    required: false
+    default: ""
+  package-name:
+    description: Package identifier for package-source-published.
+    required: false
+    default: ""
+  package-version:
+    description: Package version for package-source-published.
+    required: false
+    default: ""
+  repositories:
+    description: Comma or newline separated CloudIngenium repositories for fleet-currency-incremental.
+    required: false
+    default: ""
 
 outputs:
   granted:
@@ -84,6 +121,10 @@ outputs:
     description: True only when a valid 429 denial was returned with on-denied=defer.
   released:
     description: True when an explicit release operation succeeded.
+  dispatch-id:
+    description: Opaque deferred dispatch UUID.
+  dispatch-status:
+    description: Current prequeue lifecycle state.
 
 runs:
   using: node24

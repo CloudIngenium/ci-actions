@@ -10,6 +10,15 @@ as it is on GitHub-hosted images and CloudIngenium runner baselines.
 
 ## CI admission
 
+The action has two deliberately separate modes over the same authenticated
+transport:
+
+- `job-acquire` / `job-release` manage a lease after GitHub has created a
+  control job. The legacy names `acquire` / `release` remain supported.
+- `prequeue-defer` / `prequeue-status` submit or inspect advisory work before
+  a GitHub workflow exists. Required checks, merge queue, and deploys must not
+  use this mode.
+
 Acquire a bounded lease before starting a build-heavy validation:
 
 ```yaml
@@ -29,7 +38,7 @@ job. Its post action releases the lease even when a later step fails or is
 cancelled. A denied lease fails before checkout/setup and reports the bounded
 retry interval.
 
-Advisory or scheduled callers may set `on-denied: defer`. A valid capacity
+Advisory or scheduled job-level callers may set `on-denied: defer`. A valid capacity
 denial then returns `granted=false`, `deferred=true`, and the retry interval
 without creating a lease or failing the control job. Downstream work must
 require `granted == 'true'`; required checks and deploys retain the default
@@ -42,6 +51,31 @@ deploy work uses priority `100`, human PR and merge queue work `80`, bot work
 not a runner name. Optional deadlines must be RFC3339 and no more than 24 hours
 ahead. Decision, active-slot, and suggested-wait outputs make deferrals
 observable without exposing branch or job content.
+
+To avoid creating a GitHub job at all, an upstream producer uses the same
+action with `prequeue-defer`. Inputs are event-specific; there is intentionally
+no raw JSON, command, or secret payload input:
+
+```yaml
+- name: Defer full Skills validation before queue
+  id: prequeue
+  uses: CloudIngenium/ci-actions/ci-admission@<full-commit-sha>
+  with:
+    operation: prequeue-defer
+    token: ${{ secrets.CI_ADMISSION_TOKEN }}
+    event-type: validate-skills-full
+    source-digest: sha256:${{ inputs.source_digest }}
+    source-sha: ${{ github.sha }}
+    scope: nightly
+    requested-lane: Background
+    priority-class: "10"
+```
+
+`prequeue-status` accepts the resulting `dispatch-id` and returns
+`dispatch-status`. Producers should enqueue and exit; polling is intended for
+recovery and operator tooling, not for holding a runner. The organization
+Worker orders pending work by priority, deadline, and creation time, obtains a
+weighted lease, and emits `repository_dispatch` only after admission.
 
 For real fan-out control, acquire in a short `Control-Fast` job with
 `release-on-post: "false"`, pass the `lease-id` output to the heavy job, and
