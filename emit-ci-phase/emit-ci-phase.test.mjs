@@ -102,6 +102,9 @@ test("rejects non-canonical identity, versions, timestamps, units, and paths", (
   assert.throws(() => buildPhasePayload({ ...base, jobId: "build" }, context), /job-id must be a positive/);
   assert.throws(() => buildPhasePayload({ ...base, collectorMode: "action" }, context), /collector-mode/);
   assert.throws(() => buildPhasePayload({ ...base, selectedLane: "Runner-Win-03a" }, context), /selected-lane/);
+  assert.throws(() => buildPhasePayload({ ...base, selectedLane: "admin-short" }, context), /selected-lane/);
+  assert.equal(buildPhasePayload({ ...base, selectedLane: "admin-interactive" }, context).selected_lane, "admin-interactive");
+  assert.equal(buildPhasePayload({ ...base, selectedLane: "admin-batch" }, context).selected_lane, "admin-batch");
   assert.throws(
     () => buildPhaseEnvelope({
       payload: buildPhasePayload(base, context),

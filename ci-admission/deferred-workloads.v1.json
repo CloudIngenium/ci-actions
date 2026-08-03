@@ -1,0 +1,57 @@
+{
+  "registry_version": "1.0.0",
+  "contract_version": 4,
+  "policy_version": "local-first-shadow-v4.6.1",
+  "workloads": [
+    {
+      "id": "package-source-canary",
+      "event_type": "package-source-published",
+      "dispatch_event_type": "package-source-admitted",
+      "repository": "CloudIngenium/Knowledge-Hub",
+      "priority_class": 40,
+      "requested_lane": "Build-Fast",
+      "slot_weight": 2,
+      "deadline_seconds": 3600,
+      "owner": "CloudIngenium/Knowledge-Hub",
+      "payload_kind": "package-source-v2-dispatch",
+      "schedule": null
+    },
+    {
+      "id": "validate-skills-full-nightly",
+      "event_type": "validate-skills-full",
+      "dispatch_event_type": "validate-skills-full",
+      "repository": "CloudIngenium/Knowledge-Hub",
+      "priority_class": 10,
+      "requested_lane": "Background",
+      "slot_weight": 1,
+      "deadline_seconds": 14400,
+      "owner": "CloudIngenium/Knowledge-Hub",
+      "payload_kind": "source-validation",
+      "schedule": {
+        "cadence_minutes": 1440,
+        "window_start_minute_utc": 120,
+        "window_minutes": 60,
+        "scope": "nightly"
+      }
+    },
+    {
+      "id": "validate-plugins-full-nightly",
+      "event_type": "validate-plugins-full",
+      "dispatch_event_type": "validate-plugins-full",
+      "repository": "CloudIngenium/Knowledge-Hub",
+      "priority_class": 10,
+      "requested_lane": "Build-Fast",
+      "slot_weight": 4,
+      "deadline_seconds": 14400,
+      "owner": "CloudIngenium/Knowledge-Hub",
+      "payload_kind": "source-validation",
+      "schedule": {
+        "cadence_minutes": 1440,
+        "window_start_minute_utc": 120,
+        "window_minutes": 60,
+        "scope": "nightly"
+      }
+    }
+  ],
+  "source_sha256": "fb168a0a7b3c5062dbdc49684fec070de58c3d674fc47e972c1dce3a210c6778"
+}

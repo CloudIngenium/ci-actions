@@ -1,15 +1,18 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_ENDPOINT = "https://gh-hooks.cloudingenium.com";
 const MAX_RESPONSE_BYTES = 32 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
-const PREQUEUE_EVENT_TYPES = new Set([
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFERRED_REGISTRY = JSON.parse(readFileSync(new URL("./deferred-workloads.v1.json", import.meta.url), "utf8"));
+if (DEFERRED_REGISTRY.contract_version !== 4 || !/^[0-9a-f]{64}$/.test(DEFERRED_REGISTRY.source_sha256 || "")) {
+  throw new Error("invalid generated deferred workload registry");
+}
+const DEFERRED_WORKLOADS = new Map(DEFERRED_REGISTRY.workloads.map((workload) => [workload.event_type, workload]));
+const LEGACY_PREQUEUE_EVENT_TYPES = new Set([
   "fleet-currency-incremental",
-  "package-source-published",
   "zap-coverage-deferred",
-  "validate-skills-full",
-  "validate-plugins-full",
 ]);
 
 function input(env, name) {
@@ -109,16 +112,16 @@ function boundedIdentifier(raw, name, maximum = 120) {
   return raw;
 }
 
-function fullGitObjectId(raw) {
-  if (!/^[0-9a-f]{40,64}$/i.test(raw)) {
-    throw new Error("source-sha must be a full Git object id");
+function fullGitObjectId(raw, name = "source-sha") {
+  if (!/^[0-9a-f]{40}$/i.test(raw)) {
+    throw new Error(`${name} must be a full Git commit SHA`);
   }
   return raw.toLowerCase();
 }
 
-function validationScope(raw, name) {
-  if (raw !== "full" && raw !== "nightly") {
-    throw new Error(`${name} must be full or nightly`);
+function validationScope(raw, name, allowFull = false) {
+  if (raw !== "nightly" && !(allowFull && raw === "full")) {
+    throw new Error(`${name} must be ${allowFull ? "full or nightly" : "nightly"}`);
   }
   return raw;
 }
@@ -129,6 +132,30 @@ function repositories(raw) {
     throw new Error("repositories must contain 1-50 repositories");
   }
   return values.map((value) => exactRepository(value, "repositories entry"));
+}
+
+function exactSha256(raw, name, prefix = false) {
+  const pattern = prefix ? /^sha256:[0-9a-f]{64}$/ : /^[0-9a-f]{64}$/;
+  if (!pattern.test(raw)) throw new Error(`${name} must be ${prefix ? "sha256:<64 lowercase hex>" : "64 lowercase sha256 hex"}`);
+  return raw;
+}
+
+function gitBlobSha(raw, name) {
+  if (!/^[0-9a-f]{40}$/.test(raw)) throw new Error(`${name} must be a full Git blob SHA`);
+  return raw;
+}
+
+function boundedJsonInput(raw, name, kind) {
+  if (!raw || Buffer.byteLength(raw) > 16 * 1024) throw new Error(`${name} must be bounded JSON`);
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error(`${name} must be valid JSON`); }
+  if (kind === "array" && (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64 || parsed.some((item) => typeof item !== "string" || item.length > 128))) {
+    throw new Error(`${name} must be a non-empty bounded string array`);
+  }
+  if (kind === "object" && (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).length < 1 || Object.keys(parsed).length > 64)) {
+    throw new Error(`${name} must be a non-empty bounded object`);
+  }
+  return parsed;
 }
 
 function boundedJson(text) {
@@ -190,7 +217,7 @@ function acquireInput(env) {
   if (kind === "bot_pr" && slotWeight !== 1) {
     throw new Error("bot_pr slot-weight must be 1");
   }
-  return {
+  const payloadConfig = {
     token,
     endpoint: validateEndpoint(input(env, "ENDPOINT")),
     releaseOnPost: resolveReleaseOnPost(kind, input(env, "RELEASE-ON-POST")),
@@ -207,33 +234,61 @@ function acquireInput(env) {
       ttl_seconds: ttl,
     },
   };
+  return payloadConfig;
 }
 
 function prequeueInput(env) {
   const token = input(env, "TOKEN");
   if (!token) throw new Error("token is required");
   const eventType = input(env, "EVENT-TYPE");
-  if (!PREQUEUE_EVENT_TYPES.has(eventType)) {
+  const workload = DEFERRED_WORKLOADS.get(eventType);
+  if (!workload && !LEGACY_PREQUEUE_EVENT_TYPES.has(eventType)) {
     throw new Error("event-type is not allowlisted for prequeue admission");
   }
   const repo = exactRepository(input(env, "REPO") || env.GITHUB_REPOSITORY || "");
-  const sourceDigest = boundedIdentifier(input(env, "SOURCE-DIGEST"), "source-digest", 128);
+  if (workload && repo !== workload.repository) throw new Error("repo must match the registered deferred workload");
+  const sourceDigest = workload
+    ? exactSha256(input(env, "SOURCE-DIGEST"), "source-digest", true)
+    : boundedIdentifier(input(env, "SOURCE-DIGEST"), "source-digest", 128);
   const waveInput = input(env, "AUTOMATION-WAVE-ID");
   const payload = {};
   if (eventType === "fleet-currency-incremental") {
     payload.repositories = repositories(input(env, "REPOSITORIES"));
-  } else if (eventType === "package-source-published") {
-    payload.package_name = boundedIdentifier(input(env, "PACKAGE-NAME"), "package-name");
-    payload.package_version = boundedIdentifier(input(env, "PACKAGE-VERSION"), "package-version");
+  } else if (workload?.payload_kind === "package-source-v2-dispatch") {
+    payload.producer = boundedIdentifier(input(env, "PRODUCER"), "producer", 100);
+    payload.commit = fullGitObjectId(input(env, "COMMIT"), "commit");
+    const sourceApiPath = input(env, "SOURCE-API-PATH");
+    const expectedPrefix = `/repos/CloudIngenium/${payload.producer}/contents/`;
+    const [resourcePath, query, ...extra] = sourceApiPath.split("?");
+    const relativePath = resourcePath.slice(expectedPrefix.length);
+    if (!sourceApiPath.startsWith(expectedPrefix) || !relativePath
+      || relativePath.split("/").some((segment) => !segment || segment === "." || segment === "..")
+      || extra.length > 0 || query !== `ref=${payload.commit}`) {
+      throw new Error("source-api-path must bind the producer to the exact commit");
+    }
+    payload.source_api_path = sourceApiPath;
+    payload.digest = exactSha256(input(env, "DIGEST"), "digest");
+    payload.source_blob_sha = gitBlobSha(input(env, "SOURCE-BLOB-SHA"), "source-blob-sha");
+    if (input(env, "DIGEST-ALGORITHM") !== "sha256") throw new Error("digest-algorithm must be sha256");
+    payload.digest_algorithm = "sha256";
+    payload.content_digest = exactSha256(input(env, "CONTENT-DIGEST"), "content-digest");
+    payload.packages = boundedJsonInput(input(env, "PACKAGES-JSON"), "packages-json", "array");
+    payload.package_versions = boundedJsonInput(input(env, "PACKAGE-VERSIONS-JSON"), "package-versions-json", "object");
+    if (payload.digest !== payload.content_digest) throw new Error("digest must match content-digest");
+    const packages = new Set(payload.packages);
+    const versionNames = Object.keys(payload.package_versions);
+    if (packages.size !== payload.packages.length || versionNames.length !== packages.size || versionNames.some((name) => !packages.has(name))) {
+      throw new Error("package-versions-json must match packages-json exactly");
+    }
   } else {
     payload.source_sha = fullGitObjectId(input(env, "SOURCE-SHA"));
     if (eventType === "zap-coverage-deferred") {
-      payload.mode = validationScope(input(env, "MODE"), "mode");
+      payload.mode = validationScope(input(env, "MODE"), "mode", true);
     } else {
       payload.scope = validationScope(input(env, "SCOPE"), "scope");
     }
   }
-  return {
+  const payloadConfig = {
     token,
     endpoint: validateEndpoint(input(env, "ENDPOINT")),
     payload: {
@@ -241,13 +296,19 @@ function prequeueInput(env) {
       event_type: eventType,
       source_digest: sourceDigest,
       client_payload: payload,
-      priority_class: boundedInteger(input(env, "PRIORITY-CLASS"), "priority-class", 1, 79, 10),
-      slot_weight: boundedInteger(input(env, "SLOT-WEIGHT"), "slot-weight", 1, 4, 1),
-      requested_lane: requestedLane(input(env, "REQUESTED-LANE")) || "Background",
+      priority_class: boundedInteger(input(env, "PRIORITY-CLASS"), "priority-class", 1, 79, workload?.priority_class ?? 10),
+      slot_weight: boundedInteger(input(env, "SLOT-WEIGHT"), "slot-weight", 1, 4, workload?.slot_weight ?? 1),
+      requested_lane: requestedLane(input(env, "REQUESTED-LANE")) || workload?.requested_lane || "Background",
       automation_wave_id: waveInput ? boundedIdentifier(waveInput, "automation-wave-id", 96) : null,
       deadline_at: deadlineAt(input(env, "DEADLINE-AT")),
     },
   };
+  if (workload && (
+    payloadConfig.payload.priority_class !== workload.priority_class ||
+    payloadConfig.payload.slot_weight !== workload.slot_weight ||
+    payloadConfig.payload.requested_lane !== workload.requested_lane
+  )) throw new Error("priority, weight, and lane must match the registered workload");
+  return payloadConfig;
 }
 
 function emitPrequeueOutputs(env, body) {
@@ -265,7 +326,7 @@ export async function prequeueDefer(env = process.env, fetchImpl = fetch) {
     { method: "POST", body: JSON.stringify(config.payload) },
     fetchImpl,
   );
-  if ((response.status !== 200 && response.status !== 202) || !body.dispatch_id || !body.status) {
+  if ((response.status !== 200 && response.status !== 202) || !UUID.test(body.dispatch_id || "") || !body.status) {
     throw new Error(`CI prequeue defer failed with HTTP ${response.status}`);
   }
   emitPrequeueOutputs(env, body);
@@ -276,7 +337,7 @@ export async function prequeueStatus(env = process.env, fetchImpl = fetch) {
   const token = input(env, "TOKEN");
   if (!token) throw new Error("token is required");
   const dispatchId = input(env, "DISPATCH-ID");
-  if (!/^[0-9a-f-]{36}$/i.test(dispatchId)) {
+  if (!UUID.test(dispatchId)) {
     throw new Error("dispatch-id must be the UUID returned by prequeue-defer");
   }
   const endpoint = validateEndpoint(input(env, "ENDPOINT"));
@@ -333,7 +394,7 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
       `CI admission denied (${body.active_slot_weight ?? body.active_count}/${body.policy_limit} slots); retry after ${retry}s`,
     );
   }
-  if (!response.ok || body.granted !== true || !body.lease_id) {
+  if (!response.ok || body.granted !== true || !UUID.test(body.lease_id || "")) {
     throw new Error(`CI admission acquire failed with HTTP ${response.status}`);
   }
 
@@ -369,7 +430,7 @@ export async function release(env = process.env, fetchImpl = fetch) {
 
 export async function explicitRelease(env = process.env, fetchImpl = fetch) {
   const leaseId = input(env, "LEASE-ID");
-  if (!/^[0-9a-f-]{36}$/i.test(leaseId)) {
+  if (!UUID.test(leaseId)) {
     throw new Error("lease-id must be the UUID returned by an acquire operation");
   }
   const endpoint = validateEndpoint(input(env, "ENDPOINT"));

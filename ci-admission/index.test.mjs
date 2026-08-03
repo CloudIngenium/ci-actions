@@ -198,6 +198,7 @@ test("prequeue defer sends only the typed allowlisted payload", async () => {
   const variables = env({
     INPUT_OPERATION: "prequeue-defer",
     "INPUT_EVENT-TYPE": "validate-skills-full",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
     "INPUT_SOURCE-DIGEST": `sha256:${"b".repeat(64)}`,
     "INPUT_SOURCE-SHA": "a".repeat(40),
     INPUT_SCOPE: "nightly",
@@ -218,7 +219,7 @@ test("prequeue defer sends only the typed allowlisted payload", async () => {
   assert.equal(result.status, "pending");
   assert.equal(request.url, "https://gh-hooks.cloudingenium.com/v1/ci-admission/defer");
   assert.deepEqual(JSON.parse(request.options.body), {
-    repository: "CloudIngenium/example",
+    repository: "CloudIngenium/Knowledge-Hub",
     event_type: "validate-skills-full",
     source_digest: `sha256:${"b".repeat(64)}`,
     client_payload: { source_sha: "a".repeat(40), scope: "nightly" },
@@ -258,18 +259,63 @@ test("prequeue rejects arbitrary event shapes and required priority classes befo
   }), fetchImpl), /event-type is not allowlisted/);
   await assert.rejects(prequeueDefer(env({
     "INPUT_EVENT-TYPE": "validate-plugins-full",
-    "INPUT_SOURCE-DIGEST": "sha256:plugins",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
+    "INPUT_SOURCE-DIGEST": `sha256:${"c".repeat(64)}`,
     "INPUT_SOURCE-SHA": "abc123",
     INPUT_SCOPE: "nightly",
-  }), fetchImpl), /source-sha must be a full Git object id/);
+  }), fetchImpl), /source-sha must be a full Git commit SHA/);
   await assert.rejects(prequeueDefer(env({
     "INPUT_EVENT-TYPE": "validate-plugins-full",
-    "INPUT_SOURCE-DIGEST": "sha256:plugins",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
+    "INPUT_SOURCE-DIGEST": `sha256:${"d".repeat(64)}`,
     "INPUT_SOURCE-SHA": "a".repeat(40),
     INPUT_SCOPE: "nightly",
     "INPUT_PRIORITY-CLASS": "80",
   }), fetchImpl), /priority-class must be an integer from 1 to 79/);
+  await assert.rejects(prequeueDefer(env({
+    "INPUT_EVENT-TYPE": "validate-skills-full",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
+    "INPUT_SOURCE-DIGEST": `sha256:${"e".repeat(64)}`,
+    "INPUT_SOURCE-SHA": "a".repeat(40),
+    INPUT_SCOPE: "nightly",
+    "INPUT_PRIORITY-CLASS": "10",
+    "INPUT_SLOT-WEIGHT": "1",
+    "INPUT_REQUESTED-LANE": "Admin-Short",
+  }), fetchImpl), /priority, weight, and lane must match/);
   assert.equal(calls, 0);
+});
+
+test("prequeue package source sends immutable typed evidence from the SSOT registry", async () => {
+  const variables = env({
+    INPUT_OPERATION: "prequeue-defer",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
+    "INPUT_EVENT-TYPE": "package-source-published",
+    "INPUT_SOURCE-DIGEST": `sha256:${"e".repeat(64)}`,
+    INPUT_PRODUCER: "ci-actions",
+    INPUT_COMMIT: "a".repeat(40),
+    "INPUT_SOURCE-API-PATH": `/repos/CloudIngenium/ci-actions/contents/package-source.json?ref=${"a".repeat(40)}`,
+    INPUT_DIGEST: "f".repeat(64),
+    "INPUT_SOURCE-BLOB-SHA": "b".repeat(40),
+    "INPUT_DIGEST-ALGORITHM": "sha256",
+    "INPUT_CONTENT-DIGEST": "f".repeat(64),
+    "INPUT_PACKAGES-JSON": '["@cloudingenium/ci-actions"]',
+    "INPUT_PACKAGE-VERSIONS-JSON": '{"@cloudingenium/ci-actions":"1.0.0"}',
+    "INPUT_PRIORITY-CLASS": "40",
+    "INPUT_SLOT-WEIGHT": "2",
+    "INPUT_REQUESTED-LANE": "Build-Fast",
+  });
+  let request;
+  await prequeueDefer(variables, async (url, options) => {
+    request = { url, options };
+    return response(202, { dispatch_id: "99999999-9999-4999-8999-999999999999", status: "pending", reused: false });
+  });
+  const body = JSON.parse(request.options.body);
+  assert.equal(body.client_payload.producer, "ci-actions");
+  assert.equal(body.client_payload.digest_algorithm, "sha256");
+  assert.deepEqual(body.client_payload.packages, ["@cloudingenium/ci-actions"]);
+  assert.equal(body.priority_class, 40);
+  assert.equal(body.slot_weight, 2);
+  assert.equal(body.requested_lane, "Build-Fast");
 });
 
 test("runAction keeps job-level and prequeue operations explicit", async () => {
