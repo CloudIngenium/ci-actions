@@ -67,9 +67,13 @@ no raw JSON, command, or secret payload input:
     source-digest: sha256:${{ inputs.source_digest }}
     source-sha: ${{ github.sha }}
     scope: nightly
-    requested-lane: Background
-    priority-class: "10"
 ```
+
+Priority, weight, lane, deadline, repository, and payload kind come from the
+hash-stamped Knowledge-Hub registry. A caller may repeat those values for
+clarity, but the action rejects drift rather than overriding policy. Package
+source uses typed immutable blob, digest, package-list, and version-map inputs;
+there is no arbitrary JSON payload input.
 
 `prequeue-status` accepts the resulting `dispatch-id` and returns
 `dispatch-status`. Producers should enqueue and exit; polling is intended for
@@ -321,7 +325,7 @@ The reusable job runs only for `dependabot[bot]` pull requests. It reads
 Dependabot's SHA-pinned metadata action, optionally approves the PR when the
 caller permits workflow approvals, and arms patch/minor updates for squash
 auto-merge. Major updates remain unapproved and unarmed. The default
-`Admin-Short` lane keeps this metadata-only operation out of the build pool;
+`Admin-Batch` lane keeps this metadata-only operation out of the build pool;
 callers may supply an explicit runner-label JSON array when necessary.
 
 ## Security and compatibility

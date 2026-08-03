@@ -40,7 +40,7 @@ inputs:
   slot-weight:
     description: Heavy-validation capacity weight from 1 to 4. bot_pr must remain 1.
     required: false
-    default: "1"
+    default: ""
   requested-lane:
     description: Optional bounded capability lane used for admission evidence.
     required: false
@@ -78,19 +78,47 @@ inputs:
     required: false
     default: ""
   scope:
-    description: Full validation scope (full or nightly).
+    description: Registered full-validation scope (nightly).
     required: false
     default: ""
   mode:
     description: Zap coverage mode (full or nightly).
     required: false
     default: ""
-  package-name:
-    description: Package identifier for package-source-published.
+  producer:
+    description: Package source repository name.
     required: false
     default: ""
-  package-version:
-    description: Package version for package-source-published.
+  commit:
+    description: Full producer commit SHA.
+    required: false
+    default: ""
+  source-api-path:
+    description: Immutable CloudIngenium contents API path.
+    required: false
+    default: ""
+  digest:
+    description: Package source SHA-256 digest without prefix.
+    required: false
+    default: ""
+  source-blob-sha:
+    description: Full Git blob SHA for package source.
+    required: false
+    default: ""
+  digest-algorithm:
+    description: Digest algorithm; package source requires sha256.
+    required: false
+    default: ""
+  content-digest:
+    description: SHA-256 digest of immutable package source bytes.
+    required: false
+    default: ""
+  packages-json:
+    description: Bounded JSON array of published package names.
+    required: false
+    default: ""
+  package-versions-json:
+    description: Bounded JSON object mapping package names to versions.
     required: false
     default: ""
   repositories:
