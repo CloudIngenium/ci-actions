@@ -254,6 +254,29 @@ This artifact contract uses `schema_version: 1` and
 `schema_id: https://schemas.cloudingenium.com/ci-actions/release-manifest/v1`;
 it deliberately omits `contract_version` because it is not a KH CI event.
 
+## Ranged artifact download canary
+
+Use this action only as an explicit transport experiment after the producing
+workflow has uploaded one immutable artifact:
+
+```yaml
+- uses: CloudIngenium/ci-actions/download-ranged-artifact@<full-commit-sha>
+  with:
+    repository: ${{ github.repository }}
+    run-id: ${{ github.run_id }}
+    artifact-name: deploy-main-${{ github.sha }}
+    destination: ${{ runner.temp }}/release
+    github-token: ${{ github.token }}
+    range-count: "4"
+```
+
+The action resolves one exact, unexpired artifact, follows only a signed GitHub
+artifact host, requires byte-range support, downloads 2-8 bounded ranges in
+parallel, and verifies the Actions API SHA-256 digest before extraction. It
+does not retry, fall back, or log the signed URL. Keep the normal
+`actions/download-artifact` path as the default until at least five equivalent
+measurements show a 60-second or 30% improvement with zero retries.
+
 ## Set up Node and pnpm
 
 ```yaml
