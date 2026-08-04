@@ -25,56 +25,17 @@ inputs:
 outputs:
   artifact-id:
     description: Numeric GitHub Actions artifact ID.
-    value: ${{ steps.download.outputs.artifact-id }}
   archive-bytes:
     description: Verified archive size in bytes.
-    value: ${{ steps.download.outputs.archive-bytes }}
   digest:
     description: Verified sha256 digest reported by the Actions API.
-    value: ${{ steps.download.outputs.digest }}
   duration-ms:
     description: Download and verification wall time in milliseconds.
-    value: ${{ steps.download.outputs.duration-ms }}
   range-count:
     description: Number of ranges used.
-    value: ${{ steps.download.outputs.range-count }}
   retry-count:
     description: Network retries used. The canary currently fails closed with zero retries.
-    value: ${{ steps.download.outputs.retry-count }}
 
 runs:
-  using: composite
-  steps:
-    - id: download
-      name: Download and verify ranged archive
-      shell: pwsh
-      env:
-        INPUT_REPOSITORY: ${{ inputs.repository }}
-        INPUT_RUN_ID: ${{ inputs.run-id }}
-        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
-        INPUT_DESTINATION: ${{ inputs.destination }}
-        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
-        INPUT_RANGE_COUNT: ${{ inputs.range-count }}
-      run: node "$env:GITHUB_ACTION_PATH/download-ranged-artifact.mjs"
-
-    - name: Extract verified archive
-      shell: pwsh
-      env:
-        ARCHIVE_PATH: ${{ steps.download.outputs.archive-path }}
-        INPUT_DESTINATION: ${{ inputs.destination }}
-      run: |
-        $ErrorActionPreference = 'Stop'
-        $destination = [IO.Path]::GetFullPath($env:INPUT_DESTINATION)
-        $root = [IO.Path]::GetPathRoot($destination)
-        if ($destination -eq $root) { throw 'Refusing to extract an artifact into a filesystem root.' }
-        if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
-          throw "Artifact destination does not exist: $destination"
-        }
-        if (@(Get-ChildItem -LiteralPath $destination -Force).Count -ne 0) {
-          throw "Artifact destination must be empty: $destination"
-        }
-        try {
-          Expand-Archive -LiteralPath $env:ARCHIVE_PATH -DestinationPath $destination -Force
-        } finally {
-          Remove-Item -LiteralPath $env:ARCHIVE_PATH -Force -ErrorAction SilentlyContinue
-        }
+  using: node24
+  main: download-ranged-artifact.mjs

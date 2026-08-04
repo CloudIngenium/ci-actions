@@ -54,3 +54,23 @@ test("validates bounded inputs and signed hosts", () => {
   assert.throws(() => parseInputs({ INPUT_REPOSITORY: "owner/repo", INPUT_RUN_ID: "1", INPUT_ARTIFACT_NAME: "x", INPUT_DESTINATION: ".", INPUT_GITHUB_TOKEN: "x", INPUT_RANGE_COUNT: "9" }), /2 through 8/u);
   assert.throws(() => validateSignedUrl("https://example.com/archive.zip"), /unexpected artifact download host/u);
 });
+
+test("accepts GitHub's hyphenated JavaScript action inputs", () => {
+  const inputs = parseInputs({
+    INPUT_REPOSITORY: "owner/repo",
+    "INPUT_RUN-ID": "123",
+    "INPUT_ARTIFACT-NAME": "release",
+    INPUT_DESTINATION: ".",
+    "INPUT_GITHUB-TOKEN": "token",
+    "INPUT_RANGE-COUNT": "4",
+  });
+  assert.equal(inputs.runId, "123");
+  assert.equal(inputs.artifactName, "release");
+  assert.equal(inputs.rangeCount, 4);
+});
+
+test("declares the runner-provided Node 24 action runtime", async () => {
+  const metadata = await readFile(new URL("./action.yml", import.meta.url), "utf8");
+  assert.match(metadata, /runs:\s*\n\s+using: node24\s*\n\s+main: download-ranged-artifact\.mjs/u);
+  assert.doesNotMatch(metadata, /run:\s+node\b/u);
+});
