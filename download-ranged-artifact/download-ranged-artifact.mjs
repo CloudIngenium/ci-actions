@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { appendFile as appendText, mkdtemp, open, rm, stat } from "node:fs/promises";
+import { appendFile as appendText, mkdtemp, open, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const API_VERSION = "2022-11-28";
 const SIGNED_HOST_SUFFIXES = [
@@ -25,12 +26,12 @@ function requireText(value, name, maxLength = 512) {
 function parseInputs(env = process.env) {
   const repository = requireText(env.INPUT_REPOSITORY, "repository", 200);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) throw new Error("repository must be owner/name.");
-  const runId = requireText(env.INPUT_RUN_ID, "run-id", 24);
+  const runId = requireText(env.INPUT_RUN_ID ?? env["INPUT_RUN-ID"], "run-id", 24);
   if (!/^[1-9][0-9]*$/u.test(runId)) throw new Error("run-id must be numeric.");
-  const artifactName = requireText(env.INPUT_ARTIFACT_NAME, "artifact-name", 256);
+  const artifactName = requireText(env.INPUT_ARTIFACT_NAME ?? env["INPUT_ARTIFACT-NAME"], "artifact-name", 256);
   const destination = resolve(requireText(env.INPUT_DESTINATION, "destination", 1024));
-  const token = requireText(env.INPUT_GITHUB_TOKEN, "github-token", 4096);
-  const rangeCount = Number.parseInt(String(env.INPUT_RANGE_COUNT ?? "4"), 10);
+  const token = requireText(env.INPUT_GITHUB_TOKEN ?? env["INPUT_GITHUB-TOKEN"], "github-token", 4096);
+  const rangeCount = Number.parseInt(String(env.INPUT_RANGE_COUNT ?? env["INPUT_RANGE-COUNT"] ?? "4"), 10);
   if (!Number.isInteger(rangeCount) || rangeCount < 2 || rangeCount > 8) throw new Error("range-count must be an integer from 2 through 8.");
   return { repository, runId, artifactName, destination, token, rangeCount };
 }
@@ -101,6 +102,29 @@ async function setOutput(name, value, env = process.env) {
   if (env.GITHUB_OUTPUT) await appendText(env.GITHUB_OUTPUT, `${name}=${value}\n`, "utf8");
 }
 
+async function requireEmptyDestination(destination) {
+  const details = await stat(destination).catch(() => null);
+  if (!details?.isDirectory()) throw new Error(`Artifact destination does not exist: ${destination}`);
+  if (resolve(destination) === parse(resolve(destination)).root) throw new Error("Refusing to extract an artifact into a filesystem root.");
+  if ((await readdir(destination)).length !== 0) throw new Error(`Artifact destination must be empty: ${destination}`);
+}
+
+async function extractArchive(archivePath, destination, { spawnImpl = spawn } = {}) {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "extract-verified-archive.ps1");
+  await new Promise((resolvePromise, reject) => {
+    const child = spawnImpl("pwsh", [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script,
+      "-ArchivePath", archivePath,
+      "-Destination", destination,
+    ], { stdio: "inherit", windowsHide: true });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`Artifact extraction failed (${signal ?? `exit ${code}`}).`));
+    });
+  });
+}
+
 export async function downloadArtifact(inputs, { fetchImpl = fetch, env = process.env } = {}) {
   const startedAt = Date.now();
   const encodedName = encodeURIComponent(inputs.artifactName);
@@ -167,7 +191,14 @@ export async function downloadArtifact(inputs, { fetchImpl = fetch, env = proces
 }
 
 async function main() {
-  await downloadArtifact(parseInputs());
+  const inputs = parseInputs();
+  await requireEmptyDestination(inputs.destination);
+  const result = await downloadArtifact(inputs);
+  try {
+    await extractArchive(result.archivePath, inputs.destination);
+  } finally {
+    await rm(dirname(result.archivePath), { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -177,4 +208,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   });
 }
 
-export { buildRanges, parseContentRange, parseDigest, parseInputs, validateSignedUrl };
+export { buildRanges, extractArchive, parseContentRange, parseDigest, parseInputs, requireEmptyDestination, validateSignedUrl };

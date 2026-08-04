@@ -273,7 +273,9 @@ workflow has uploaded one immutable artifact:
 The action resolves one exact, unexpired artifact, follows only a signed GitHub
 artifact host, requires byte-range support, downloads 2-8 bounded ranges in
 parallel, and verifies the Actions API SHA-256 digest before extraction. It
-does not retry, fall back, or log the signed URL. Keep the normal
+uses the runner-bundled Node action runtime, so the target machine does not
+need a separate `node` installation. It does not retry, fall back, or log the
+signed URL. Keep the normal
 `actions/download-artifact` path as the default until at least five equivalent
 measurements show a 60-second or 30% improvement with zero retries.
 
