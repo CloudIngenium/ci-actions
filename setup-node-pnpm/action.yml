@@ -5,6 +5,21 @@ outputs:
   pnpm-version:
     description: Exact pnpm version selected from the input, packageManager, or fallback.
     value: ${{ steps.resolve_pnpm.outputs.version }}
+  cache-class:
+    description: Exact initial state of the isolated pnpm store.
+    value: ${{ steps.cache_evidence.outputs['cache-class'] }}
+  cache-key-hash:
+    description: SHA-256 cache key derived from Node, pnpm, and the lockfile.
+    value: ${{ steps.cache_evidence.outputs['cache-key-hash'] }}
+  lock-hash:
+    description: SHA-256 of the selected lockfile, or of the explicit unavailable sentinel.
+    value: ${{ steps.cache_evidence.outputs['lock-hash'] }}
+  cache-observation-path:
+    description: Canonical observation path when exact telemetry was requested.
+    value: ${{ steps.emit_cache.outputs['payload-path'] }}
+  telemetry-status:
+    description: emitted or not_requested.
+    value: ${{ steps.emit_cache.outputs['telemetry-status'] || steps.cache_evidence.outputs['telemetry-status'] }}
 
 inputs:
   node-version:
@@ -27,6 +42,18 @@ inputs:
     description: Package scope configured by actions/setup-node.
     required: false
     default: "@cloudingenium"
+  lock-file:
+    description: Dependency lockfile used to content-address the isolated pnpm store observation.
+    required: false
+    default: pnpm-lock.yaml
+  job-id:
+    description: Optional exact numeric job ID. When supplied with the manifest hash, emits cache evidence.
+    required: false
+    default: ""
+  source-manifest-sha256:
+    description: Optional Knowledge-Hub contract manifest SHA-256 used with job-id.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -75,3 +102,36 @@ runs:
         } >> "$GITHUB_ENV"
         echo "$pnpm_root/bin" >> "$GITHUB_PATH"
         "$pnpm_root/bin/pnpm" --version
+
+    - name: Classify isolated pnpm store
+      id: cache_evidence
+      shell: bash
+      env:
+        LOCK_FILE: ${{ inputs.lock-file }}
+        PNPM_VERSION: ${{ steps.resolve_pnpm.outputs.version }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/cache-evidence.mjs" \
+          --lock-file "$LOCK_FILE" \
+          --node-version "$(node --version)" \
+          --pnpm-version "$PNPM_VERSION" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - name: Emit exact pnpm cache observation
+      id: emit_cache
+      if: inputs.job-id != '' && inputs.source-manifest-sha256 != ''
+      shell: bash
+      env:
+        INPUT_CACHE_NAMESPACE: pnpm-store
+        INPUT_CACHE_KEY_HASH: ${{ steps.cache_evidence.outputs['cache-key-hash'] }}
+        INPUT_LOCK_HASH: ${{ steps.cache_evidence.outputs['lock-hash'] }}
+        INPUT_OPERATION: probe
+        INPUT_CACHE_CLASS: ${{ steps.cache_evidence.outputs['cache-class'] }}
+        INPUT_JOB_ID: ${{ inputs.job-id }}
+        INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
+        INPUT_FINGERPRINT_VERSION: "9"
+        INPUT_POOL_MAPPING_VERSION: "10"
+        INPUT_POLICY_VERSION: local-first-shadow-v4.6.4-r3
+        INPUT_COLLECTOR_MODE: hook
+        INPUT_OUTPUT_PATH: ci-telemetry/pnpm-store-cache-observation.json
+      run: node "$GITHUB_ACTION_PATH/../emit-cache-observation/emit-cache-observation.mjs"

@@ -317,6 +317,8 @@ measurements show a 60-second or 30% improvement with zero retries.
 - uses: CloudIngenium/ci-actions/setup-node-pnpm@<full-commit-sha>
   with:
     node-version: "24"
+    job-id: ${{ steps.job-context.outputs.job-id }}
+    source-manifest-sha256: ${{ vars.CI_CONTROL_V4_MANIFEST_SHA256 }}
 ```
 
 The action installs Node first, resolves the exact stable pnpm version from the
@@ -326,6 +328,23 @@ override, and `package-manager-file` selects a nested installation boundary.
 When no declaration exists, the action falls back to pnpm 11.13.0. It never uses
 Corepack or `pnpm/action-setup`, and it does not share a pnpm CLI or store between
 jobs.
+
+Because the action deletes and recreates its job-scoped pnpm store, its initial
+cache class is provably `cold`. When an exact numeric job ID and the generated
+Knowledge-Hub manifest digest are supplied, it writes a canonical
+`cache_observation` below `RUNNER_TEMP/ci-telemetry`; otherwise telemetry is
+reported as `not_requested` rather than guessed. The cache key is derived from
+the lockfile plus exact Node and pnpm versions. Workflows using another cache
+mechanism should emit that mechanism's measured hit separately with
+`emit-cache-observation`.
+
+## Emit exact cache evidence
+
+Use `emit-cache-observation` after resolving the numeric job context. It accepts
+only a content-addressed SHA-256 key and measured `warm`, `cold`, or `unknown`
+state. Warm implies `hit=true`, cold implies `hit=false`, and unknown remains
+null. The action writes a bounded canonical event and performs no network
+request; runner hooks forward it through the existing telemetry spool.
 
 ## Clean stale Git locks
 
