@@ -218,6 +218,14 @@ GitHub tokens, bearer tokens, private keys, embedded URL credentials, and SAS
 query values are redacted before disk or output. Send the resulting file with a
 separate trusted ingest step; this action performs no network request.
 
+Dynamic release scripts can reuse the same validator without constructing a
+second payload format. Run `setup-ci-phase-emitter` once after
+`resolve-job-context`; it exports the SHA-pinned Node entrypoint and contract
+versions as `CI_PHASE_EMITTER`, `CI_CONTROL_V4_MANIFEST_SHA256`,
+`CI_FINGERPRINT_VERSION`, `CI_POOL_MAPPING_VERSION`, `CI_POLICY_VERSION`, and
+`CI_SELECTED_LANE`. Product scripts invoke that entrypoint with the same
+arguments documented above and append canonical events under `RUNNER_TEMP`.
+
 ## Exact .NET and persistent NuGet
 
 Prefer an already installed exact SDK and use runner-local NuGet stores:
