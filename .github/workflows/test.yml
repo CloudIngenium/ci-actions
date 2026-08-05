@@ -40,6 +40,7 @@ jobs:
           runner-baseline/runner-baseline.test.mjs
           resolve-job-context/resolve-job-context.test.mjs
           emit-ci-phase/emit-ci-phase.test.mjs
+          setup-ci-phase-emitter/action.contract.test.mjs
           setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
           release-manifest/release-manifest.test.mjs
           download-ranged-artifact/download-ranged-artifact.test.mjs
@@ -146,6 +147,12 @@ jobs:
           source-manifest-sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           metadata-json: '{"cache_state":"warm","token":"redaction-fixture-value"}'
 
+      - id: dynamic-phase-emitter
+        uses: ./setup-ci-phase-emitter
+        with:
+          source-manifest-sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          selected-lane: "build-fast"
+
       - id: release
         uses: ./release-manifest
         with:
@@ -158,6 +165,13 @@ jobs:
       - name: Verify composite action outputs
         shell: pwsh
         run: |
+          if (-not (Test-Path -LiteralPath '${{ steps.dynamic-phase-emitter.outputs.emitter-path }}' -PathType Leaf)) {
+            throw 'Dynamic phase emitter path was not exported.'
+          }
+          if ($env:CI_FINGERPRINT_VERSION -ne '9' -or $env:CI_POOL_MAPPING_VERSION -ne '10' -or
+              $env:CI_SELECTED_LANE -ne 'build-fast') {
+            throw 'Dynamic phase emitter contract versions were not exported.'
+          }
           if ("${{ steps.baseline.outputs.eligible }}" -ne "true") { throw "Runner baseline was not eligible" }
           if ("${{ steps.baseline-drift.outputs.drifted }}" -ne "true") { throw "Expected baseline drift" }
           if ("${{ steps.baseline-drift.outputs.drift-count }}" -ne "1") { throw "Expected one drift reason" }
