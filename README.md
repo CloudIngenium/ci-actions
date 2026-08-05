@@ -171,7 +171,8 @@ The action matches the unique in-progress job assigned to `RUNNER_NAME`, caches
 the result under `RUNNER_TEMP`, and exports `GITHUB_JOB_ID`, `CI_JOB_ID`, and
 `CI_TRACE_ID` for later steps. Zero or multiple candidates produce
 `correlation-quality=unavailable`; the action never substitutes a workflow job
-key or runner name for the numeric identity.
+key or runner name for the numeric identity. It is a shell-independent Node
+action and therefore has the same execution contract on Linux and Windows.
 
 ## Emit CI phase v4
 

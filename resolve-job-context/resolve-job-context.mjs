@@ -138,6 +138,10 @@ async function appendEnvironment(filePath, values) {
 
 async function main() {
   const args = readArguments(process.argv.slice(2));
+  const actionInput = (name, legacyName = name.replaceAll("-", "_")) =>
+    process.env[`INPUT_${name.toUpperCase()}`]
+    || process.env[`INPUT_${legacyName.toUpperCase()}`]
+    || "";
   const context = {
     repository: process.env.GITHUB_REPOSITORY,
     runId: process.env.GITHUB_RUN_ID,
@@ -145,22 +149,25 @@ async function main() {
     runnerName: process.env.RUNNER_NAME,
   };
   const root = process.env.RUNNER_TEMP || process.cwd();
-  const cachePath = resolveInside(root, args.get("cache-path") || "ci-job-context.json");
+  const cachePath = resolveInside(
+    root,
+    args.get("cache-path") || actionInput("cache-path") || "ci-job-context.json",
+  );
   const result = await resolveCurrentJobContext({
-    apiUrl: args.get("api-url") || "https://api.github.com",
-    token: process.env.INPUT_GITHUB_TOKEN || "",
+    apiUrl: args.get("api-url") || actionInput("api-url") || "https://api.github.com",
+    token: actionInput("github-token") || process.env.INPUT_GITHUB_TOKEN || "",
     cachePath,
     context,
   });
 
-  await writeOutputs(args.get("github-output"), {
+  await writeOutputs(args.get("github-output") || process.env.GITHUB_OUTPUT, {
     "job-id": result.jobId,
     "trace-id": result.traceId,
     "correlation-quality": result.correlationQuality,
     reason: result.reason,
     "cache-hit": String(result.cacheHit),
   });
-  await appendEnvironment(args.get("github-env"), {
+  await appendEnvironment(args.get("github-env") || process.env.GITHUB_ENV, {
     GITHUB_JOB_ID: result.jobId,
     CI_JOB_ID: result.jobId,
     CI_TRACE_ID: result.traceId,
@@ -169,7 +176,7 @@ async function main() {
 
   if (result.correlationQuality !== "exact") {
     process.stdout.write(`::warning title=CI job context unavailable::${result.reason}; exact phase telemetry will be skipped.\n`);
-    if ((args.get("fail-on-unresolved") || "false") === "true") process.exitCode = 1;
+    if ((args.get("fail-on-unresolved") || actionInput("fail-on-unresolved") || "false") === "true") process.exitCode = 1;
   }
 }
 
