@@ -1,0 +1,55 @@
+name: Resolve exact GitHub job context
+description: Resolve the numeric workflow job ID for the current runner without inventing an identity.
+
+inputs:
+  github-token:
+    description: Token with Actions read permission for the current repository.
+    required: true
+  api-url:
+    description: GitHub API base URL.
+    required: false
+    default: https://api.github.com
+  cache-path:
+    description: Context cache path relative to RUNNER_TEMP.
+    required: false
+    default: ci-job-context.json
+  fail-on-unresolved:
+    description: Fail the job when the current workflow job cannot be resolved exactly.
+    required: false
+    default: "false"
+
+outputs:
+  job-id:
+    description: Exact numeric GitHub workflow job ID, or an empty value when unavailable.
+    value: ${{ steps.resolve.outputs['job-id'] }}
+  trace-id:
+    description: Deterministic run-level trace ID.
+    value: ${{ steps.resolve.outputs['trace-id'] }}
+  correlation-quality:
+    description: exact or unavailable.
+    value: ${{ steps.resolve.outputs['correlation-quality'] }}
+  reason:
+    description: Bounded machine-readable resolution outcome.
+    value: ${{ steps.resolve.outputs.reason }}
+  cache-hit:
+    description: true when the exact context came from the job-local cache.
+    value: ${{ steps.resolve.outputs['cache-hit'] }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_API_URL: ${{ inputs.api-url }}
+        INPUT_CACHE_PATH: ${{ inputs.cache-path }}
+        INPUT_FAIL_ON_UNRESOLVED: ${{ inputs.fail-on-unresolved }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/resolve-job-context.mjs" \
+          --api-url "$INPUT_API_URL" \
+          --cache-path "$INPUT_CACHE_PATH" \
+          --fail-on-unresolved "$INPUT_FAIL_ON_UNRESOLVED" \
+          --github-output "$GITHUB_OUTPUT" \
+          --github-env "$GITHUB_ENV"
