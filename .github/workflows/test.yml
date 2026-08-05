@@ -7,6 +7,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -37,6 +38,7 @@ jobs:
           detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
           runner-baseline/runner-baseline.test.mjs
+          resolve-job-context/resolve-job-context.test.mjs
           emit-ci-phase/emit-ci-phase.test.mjs
           setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
           release-manifest/release-manifest.test.mjs
@@ -123,6 +125,12 @@ jobs:
           sdk-setup-mode: "setup"
           cache-root: ${{ runner.temp }}/ci-actions-nuget
 
+      - id: job-context
+        uses: ./resolve-job-context
+        with:
+          github-token: ${{ github.token }}
+          fail-on-unresolved: "true"
+
       - id: phase
         uses: ./emit-ci-phase
         with:
@@ -132,7 +140,8 @@ jobs:
           started-at: "2026-07-23T17:00:00Z"
           completed-at: "2026-07-23T17:00:01Z"
           observed-at: "2026-07-23T17:00:02Z"
-          job-id: "400000001"
+          job-id: ${{ steps.job-context.outputs.job-id }}
+          trace-id: ${{ steps.job-context.outputs.trace-id }}
           collector-mode: "hook"
           source-manifest-sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           metadata-json: '{"cache_state":"warm","token":"redaction-fixture-value"}'
@@ -153,6 +162,7 @@ jobs:
           if ("${{ steps.baseline-drift.outputs.drifted }}" -ne "true") { throw "Expected baseline drift" }
           if ("${{ steps.baseline-drift.outputs.drift-count }}" -ne "1") { throw "Expected one drift reason" }
           if ("${{ steps.dotnet.outputs.sdk-version }}" -ne "10.0.302") { throw "Wrong SDK selected" }
+          if ("${{ steps.job-context.outputs.correlation-quality }}" -ne "exact") { throw "Job context was not exact" }
 
           $payload = Get-Content -Raw -LiteralPath "${{ steps.phase.outputs.payload-path }}"
           $event = $payload | ConvertFrom-Json

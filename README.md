@@ -150,6 +150,29 @@ manifest path, and manifest SHA-256. The manifest records OS, architecture,
 boot ID, installed SDKs, Node, pnpm, PowerShell, Git, and detected browser
 versions. It never edits runner labels or attempts remediation.
 
+## Resolve exact workflow job context
+
+GitHub does not expose the numeric workflow job ID as a default environment
+variable. Resolve it once per job before emitting exact phase telemetry:
+
+```yaml
+permissions:
+  actions: read
+  contents: read
+
+steps:
+  - id: job-context
+    uses: CloudIngenium/ci-actions/resolve-job-context@<full-commit-sha>
+    with:
+      github-token: ${{ github.token }}
+```
+
+The action matches the unique in-progress job assigned to `RUNNER_NAME`, caches
+the result under `RUNNER_TEMP`, and exports `GITHUB_JOB_ID`, `CI_JOB_ID`, and
+`CI_TRACE_ID` for later steps. Zero or multiple candidates produce
+`correlation-quality=unavailable`; the action never substitutes a workflow job
+key or runner name for the numeric identity.
+
 ## Emit CI phase v4
 
 Write a validated phase event to `RUNNER_TEMP` and optionally append it to a
