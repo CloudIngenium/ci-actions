@@ -31,5 +31,5 @@ outputs:
     description: true when the exact context came from the job-local cache.
 
 runs:
-  using: node20
+  using: node24
   main: resolve-job-context.mjs
