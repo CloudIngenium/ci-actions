@@ -37,6 +37,8 @@ jobs:
           ci-admission/index.test.mjs
           detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
+          setup-node-pnpm/cache-evidence.test.mjs
+          emit-cache-observation/emit-cache-observation.test.mjs
           runner-baseline/runner-baseline.test.mjs
           resolve-job-context/resolve-job-context.test.mjs
           emit-ci-phase/emit-ci-phase.test.mjs
@@ -79,6 +81,9 @@ jobs:
         if: runner.os == 'Linux'
         id: node-pnpm
         uses: ./setup-node-pnpm
+        with:
+          job-id: "400000001"
+          source-manifest-sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
       - name: Verify exact isolated Node toolchain
         if: runner.os == 'Linux'
@@ -90,6 +95,9 @@ jobs:
           esac
           test "$(pnpm --version)" = "11.13.0"
           test "${{ steps.node-pnpm.outputs['pnpm-version'] }}" = "11.13.0"
+          test "${{ steps.node-pnpm.outputs['cache-class'] }}" = "cold"
+          test "${{ steps.node-pnpm.outputs['telemetry-status'] }}" = "emitted"
+          test -s "${{ steps.node-pnpm.outputs['cache-observation-path'] }}"
           case "$PNPM_HOME" in
             "$RUNNER_TEMP"/*) ;;
             *) echo "::error::PNPM_HOME is not job-scoped: $PNPM_HOME"; exit 1 ;;

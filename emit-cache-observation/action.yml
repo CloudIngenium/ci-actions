@@ -1,0 +1,77 @@
+name: Emit canonical cache observation v4
+description: Emit exact, content-free cache evidence for an existing CI job identity.
+
+inputs:
+  cache-namespace:
+    description: Stable lower-case cache namespace.
+    required: true
+  cache-key-hash:
+    description: SHA-256 of the content-addressed cache key.
+    required: true
+  lock-hash:
+    description: Optional SHA-256 of the dependency lock input.
+    required: false
+    default: ""
+  operation:
+    description: probe, restore, or save.
+    required: false
+    default: probe
+  cache-class:
+    description: warm, cold, or unknown.
+    required: true
+  job-id:
+    description: Exact numeric GitHub workflow job ID.
+    required: true
+  source-manifest-sha256:
+    description: SHA-256 of the generated Knowledge-Hub CI control manifest.
+    required: true
+  size-bytes:
+    description: Optional observed cache size.
+    required: false
+    default: ""
+  duration-ms:
+    description: Optional observation duration.
+    required: false
+    default: ""
+  net-savings-ms:
+    description: Optional measured net savings; estimates are not accepted.
+    required: false
+    default: ""
+  observed-at:
+    description: Optional RFC 3339 observation time; defaults to current UTC.
+    required: false
+    default: ""
+  fingerprint-version:
+    description: Knowledge-Hub fingerprint contract version.
+    required: false
+    default: "9"
+  pool-mapping-version:
+    description: Knowledge-Hub pool mapping version.
+    required: false
+    default: "10"
+  policy-version:
+    description: Knowledge-Hub CI policy version.
+    required: false
+    default: local-first-shadow-v4.6.4-r3
+  collector-mode:
+    description: Collector source for the observation.
+    required: false
+    default: hook
+  output-path:
+    description: Observation path relative to RUNNER_TEMP.
+    required: false
+    default: ci-telemetry/cache-observation.json
+
+outputs:
+  payload-path:
+    description: Absolute path to the canonical cache observation.
+  payload-sha256:
+    description: SHA-256 of the canonical payload.
+  cache-class:
+    description: Validated warm, cold, or unknown classification.
+  telemetry-status:
+    description: emitted when exact canonical evidence was written.
+
+runs:
+  using: node24
+  main: emit-cache-observation.mjs
