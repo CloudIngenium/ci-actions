@@ -129,9 +129,9 @@ runs:
         INPUT_CACHE_CLASS: ${{ steps.cache_evidence.outputs['cache-class'] }}
         INPUT_JOB_ID: ${{ inputs.job-id }}
         INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
-        INPUT_FINGERPRINT_VERSION: "9"
-        INPUT_POOL_MAPPING_VERSION: "10"
-        INPUT_POLICY_VERSION: local-first-shadow-v4.6.4-r3
+        INPUT_FINGERPRINT_VERSION: "10"
+        INPUT_POOL_MAPPING_VERSION: "11"
+        INPUT_POLICY_VERSION: local-first-shadow-v4.6.6-r4
         INPUT_COLLECTOR_MODE: hook
         INPUT_OUTPUT_PATH: ci-telemetry/pnpm-store-cache-observation.json
       run: node "$GITHUB_ACTION_PATH/../emit-cache-observation/emit-cache-observation.mjs"

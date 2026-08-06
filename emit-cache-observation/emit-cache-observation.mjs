@@ -89,7 +89,7 @@ export function buildCacheObservation(input, context) {
   delete correlation.run_span_id;
   return {
     payload: {
-      contract_version: 4,
+      contract_version: "cloudingenium.ci-control/4",
       event_type: "cache_observation",
       identity: {
         repository: context.repository,
@@ -98,7 +98,7 @@ export function buildCacheObservation(input, context) {
         job_id: jobId,
       },
       versions: {
-        contract_version: 4,
+        contract_version: "cloudingenium.ci-control/4",
         fingerprint_version: positiveInteger(input.fingerprintVersion, "fingerprint-version"),
         pool_mapping_version: positiveInteger(input.poolMappingVersion, "pool-mapping-version"),
         policy_version: input.policyVersion,
@@ -145,9 +145,9 @@ async function main() {
     durationMs: actionInput("duration-ms"),
     netSavingsMs: actionInput("net-savings-ms"),
     observedAt: actionInput("observed-at"),
-    fingerprintVersion: actionInput("fingerprint-version") || "9",
-    poolMappingVersion: actionInput("pool-mapping-version") || "10",
-    policyVersion: actionInput("policy-version") || "local-first-shadow-v4.6.4-r3",
+    fingerprintVersion: actionInput("fingerprint-version") || "10",
+    poolMappingVersion: actionInput("pool-mapping-version") || "11",
+    policyVersion: actionInput("policy-version") || "local-first-shadow-v4.6.6-r4",
     collectorMode: actionInput("collector-mode") || "hook",
   }, context);
   const root = process.env.RUNNER_TEMP || process.cwd();

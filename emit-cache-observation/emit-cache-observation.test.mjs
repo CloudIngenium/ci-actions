@@ -31,6 +31,8 @@ function input(overrides = {}) {
 test("builds exact content-free cold cache evidence", () => {
   const { payload, sourceManifestSha256 } = buildCacheObservation(input(), context);
   assert.equal(payload.event_type, "cache_observation");
+  assert.equal(payload.contract_version, "cloudingenium.ci-control/4");
+  assert.equal(payload.versions.contract_version, "cloudingenium.ci-control/4");
   assert.equal(payload.identity.job_id, "400000001");
   assert.equal(payload.cache_class, "cold");
   assert.equal(payload.hit, false);

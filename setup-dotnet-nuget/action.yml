@@ -46,6 +46,14 @@ inputs:
     description: Restore summary path relative to RUNNER_TEMP.
     required: false
     default: "nuget-restore-summary.json"
+  job-id:
+    description: Optional exact numeric job ID. When supplied with the manifest hash, emits cache evidence.
+    required: false
+    default: ""
+  source-manifest-sha256:
+    description: Optional Knowledge-Hub contract manifest SHA-256 used with job-id.
+    required: false
+    default: ""
 
 outputs:
   sdk-version:
@@ -75,6 +83,21 @@ outputs:
   diagnostics-path:
     description: Redacted diagnostic log, or empty for normal restore.
     value: ${{ steps.restore_unix.outputs['diagnostics-path'] || steps.restore_windows.outputs['diagnostics-path'] }}
+  cache-class:
+    description: Initial state of the persistent NuGet stores.
+    value: ${{ steps.cache_evidence_unix.outputs['cache-class'] || steps.cache_evidence_windows.outputs['cache-class'] }}
+  cache-key-hash:
+    description: SHA-256 cache key derived from SDK and packages.lock.json inputs.
+    value: ${{ steps.cache_evidence_unix.outputs['cache-key-hash'] || steps.cache_evidence_windows.outputs['cache-key-hash'] }}
+  lock-hash:
+    description: SHA-256 of the ordered packages.lock.json inputs or the unavailable sentinel.
+    value: ${{ steps.cache_evidence_unix.outputs['lock-hash'] || steps.cache_evidence_windows.outputs['lock-hash'] }}
+  cache-observation-path:
+    description: Canonical observation path when exact telemetry was requested.
+    value: ${{ steps.emit_cache_unix.outputs['payload-path'] || steps.emit_cache_windows.outputs['payload-path'] }}
+  telemetry-status:
+    description: emitted or not_requested.
+    value: ${{ steps.emit_cache_unix.outputs['telemetry-status'] || steps.emit_cache_windows.outputs['telemetry-status'] || steps.cache_evidence_unix.outputs['telemetry-status'] || steps.cache_evidence_windows.outputs['telemetry-status'] }}
 
 runs:
   using: composite
@@ -155,6 +178,76 @@ runs:
       run: |
         $ErrorActionPreference = "Stop"
         & node "$env:GITHUB_ACTION_PATH/verify-dotnet.mjs" "$env:SDK_VERSION"
+
+    - id: cache_evidence_unix
+      name: Classify persistent NuGet stores
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        RESTORE_PATH: ${{ inputs.restore-path }}
+        SDK_VERSION: ${{ steps.resolve_unix.outputs['sdk-version'] }}
+        PACKAGES_PATH: ${{ steps.resolve_unix.outputs['packages-path'] }}
+        HTTP_CACHE_PATH: ${{ steps.resolve_unix.outputs['http-cache-path'] }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/cache-evidence.mjs" \
+          --restore-path "$RESTORE_PATH" --sdk-version "$SDK_VERSION" \
+          --packages-path "$PACKAGES_PATH" --http-cache-path "$HTTP_CACHE_PATH" \
+          --github-output "$GITHUB_OUTPUT"
+
+    - id: cache_evidence_windows
+      name: Classify persistent NuGet stores
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        RESTORE_PATH: ${{ inputs.restore-path }}
+        SDK_VERSION: ${{ steps.resolve_windows.outputs['sdk-version'] }}
+        PACKAGES_PATH: ${{ steps.resolve_windows.outputs['packages-path'] }}
+        HTTP_CACHE_PATH: ${{ steps.resolve_windows.outputs['http-cache-path'] }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        & node "$env:GITHUB_ACTION_PATH/cache-evidence.mjs" `
+          --restore-path "$env:RESTORE_PATH" --sdk-version "$env:SDK_VERSION" `
+          --packages-path "$env:PACKAGES_PATH" --http-cache-path "$env:HTTP_CACHE_PATH" `
+          --github-output "$env:GITHUB_OUTPUT"
+
+    - id: emit_cache_unix
+      name: Emit exact NuGet cache observation
+      if: runner.os != 'Windows' && inputs.job-id != '' && inputs.source-manifest-sha256 != ''
+      shell: bash
+      env:
+        INPUT_CACHE_NAMESPACE: nuget-persistent
+        INPUT_CACHE_KEY_HASH: ${{ steps.cache_evidence_unix.outputs['cache-key-hash'] || steps.cache_evidence_windows.outputs['cache-key-hash'] }}
+        INPUT_LOCK_HASH: ${{ steps.cache_evidence_unix.outputs['lock-hash'] || steps.cache_evidence_windows.outputs['lock-hash'] }}
+        INPUT_OPERATION: probe
+        INPUT_CACHE_CLASS: ${{ steps.cache_evidence_unix.outputs['cache-class'] || steps.cache_evidence_windows.outputs['cache-class'] }}
+        INPUT_JOB_ID: ${{ inputs.job-id }}
+        INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
+        INPUT_FINGERPRINT_VERSION: "10"
+        INPUT_POOL_MAPPING_VERSION: "11"
+        INPUT_POLICY_VERSION: local-first-shadow-v4.6.6-r4
+        INPUT_COLLECTOR_MODE: hook
+        INPUT_OUTPUT_PATH: ci-telemetry/nuget-cache-observation.json
+      run: node "$GITHUB_ACTION_PATH/../emit-cache-observation/emit-cache-observation.mjs"
+
+    - id: emit_cache_windows
+      name: Emit exact NuGet cache observation
+      if: runner.os == 'Windows' && inputs.job-id != '' && inputs.source-manifest-sha256 != ''
+      shell: pwsh
+      env:
+        INPUT_CACHE_NAMESPACE: nuget-persistent
+        INPUT_CACHE_KEY_HASH: ${{ steps.cache_evidence_windows.outputs['cache-key-hash'] }}
+        INPUT_LOCK_HASH: ${{ steps.cache_evidence_windows.outputs['lock-hash'] }}
+        INPUT_OPERATION: probe
+        INPUT_CACHE_CLASS: ${{ steps.cache_evidence_windows.outputs['cache-class'] }}
+        INPUT_JOB_ID: ${{ inputs.job-id }}
+        INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
+        INPUT_FINGERPRINT_VERSION: "10"
+        INPUT_POOL_MAPPING_VERSION: "11"
+        INPUT_POLICY_VERSION: local-first-shadow-v4.6.6-r4
+        INPUT_COLLECTOR_MODE: hook
+        INPUT_OUTPUT_PATH: ci-telemetry/nuget-cache-observation.json
+      run: node "$env:GITHUB_ACTION_PATH/../emit-cache-observation/emit-cache-observation.mjs"
 
     - id: restore_unix
       name: Restore locked dependencies

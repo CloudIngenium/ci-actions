@@ -149,7 +149,7 @@ export function buildPhasePayload(input, context = {}) {
   }
 
   const payload = {
-    contract_version: 4,
+    contract_version: "cloudingenium.ci-control/4",
     event_type: "ci_phase",
     identity: {
       repository,
@@ -158,7 +158,7 @@ export function buildPhasePayload(input, context = {}) {
       job_id: jobId,
     },
     versions: {
-      contract_version: 4,
+      contract_version: "cloudingenium.ci-control/4",
       fingerprint_version: fingerprintVersion,
       pool_mapping_version: poolMappingVersion,
       policy_version: input.policyVersion,
@@ -252,9 +252,9 @@ async function main() {
       durationMs: args.get("duration-ms"),
       unit: args.get("unit"),
       jobId: args.get("job-id"),
-      fingerprintVersion: args.get("fingerprint-version") || "1",
-      poolMappingVersion: args.get("pool-mapping-version") || "3",
-      policyVersion: args.get("policy-version") || "local-first-shadow-v4",
+      fingerprintVersion: args.get("fingerprint-version") || "10",
+      poolMappingVersion: args.get("pool-mapping-version") || "11",
+      policyVersion: args.get("policy-version") || "local-first-shadow-v4.6.6-r4",
       collectorMode: args.get("collector-mode") || "hook",
       selectedLane: args.get("selected-lane"),
       traceId: args.get("trace-id"),
