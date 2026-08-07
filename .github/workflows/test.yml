@@ -33,6 +33,7 @@ jobs:
         shell: bash
         run: >-
           node --test
+          contract-versions.test.mjs
           lib/contract.test.mjs
           ci-admission/index.test.mjs
           detect-ci-scope/detect-ci-scope.test.mjs

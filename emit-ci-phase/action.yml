@@ -44,7 +44,7 @@ inputs:
   policy-version:
     description: Knowledge-Hub CI control policy version.
     required: false
-    default: "local-first-shadow-v4.6.6-r4"
+    default: "local-first-shadow-v4.6.9-r5"
   collector-mode:
     description: fast, slow, all, hook, or webhook.
     required: false
