@@ -147,7 +147,7 @@ async function main() {
     observedAt: actionInput("observed-at"),
     fingerprintVersion: actionInput("fingerprint-version") || "10",
     poolMappingVersion: actionInput("pool-mapping-version") || "11",
-    policyVersion: actionInput("policy-version") || "local-first-shadow-v4.6.6-r4",
+    policyVersion: actionInput("policy-version") || "local-first-shadow-v4.6.9-r5",
     collectorMode: actionInput("collector-mode") || "hook",
   }, context);
   const root = process.env.RUNNER_TEMP || process.cwd();

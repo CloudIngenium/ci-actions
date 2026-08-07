@@ -54,6 +54,18 @@ inputs:
     description: Optional Knowledge-Hub contract manifest SHA-256 used with job-id.
     required: false
     default: ""
+  fingerprint-version:
+    description: Knowledge-Hub fingerprint contract version recorded in cache evidence.
+    required: false
+    default: "10"
+  pool-mapping-version:
+    description: Knowledge-Hub pool mapping version recorded in cache evidence.
+    required: false
+    default: "11"
+  policy-version:
+    description: Knowledge-Hub CI policy version recorded in cache evidence.
+    required: false
+    default: local-first-shadow-v4.6.9-r5
 
 outputs:
   sdk-version:
@@ -223,9 +235,9 @@ runs:
         INPUT_CACHE_CLASS: ${{ steps.cache_evidence_unix.outputs['cache-class'] || steps.cache_evidence_windows.outputs['cache-class'] }}
         INPUT_JOB_ID: ${{ inputs.job-id }}
         INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
-        INPUT_FINGERPRINT_VERSION: "10"
-        INPUT_POOL_MAPPING_VERSION: "11"
-        INPUT_POLICY_VERSION: local-first-shadow-v4.6.6-r4
+        INPUT_FINGERPRINT_VERSION: ${{ inputs.fingerprint-version }}
+        INPUT_POOL_MAPPING_VERSION: ${{ inputs.pool-mapping-version }}
+        INPUT_POLICY_VERSION: ${{ inputs.policy-version }}
         INPUT_COLLECTOR_MODE: hook
         INPUT_OUTPUT_PATH: ci-telemetry/nuget-cache-observation.json
       run: node "$GITHUB_ACTION_PATH/../emit-cache-observation/emit-cache-observation.mjs"
@@ -242,9 +254,9 @@ runs:
         INPUT_CACHE_CLASS: ${{ steps.cache_evidence_windows.outputs['cache-class'] }}
         INPUT_JOB_ID: ${{ inputs.job-id }}
         INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
-        INPUT_FINGERPRINT_VERSION: "10"
-        INPUT_POOL_MAPPING_VERSION: "11"
-        INPUT_POLICY_VERSION: local-first-shadow-v4.6.6-r4
+        INPUT_FINGERPRINT_VERSION: ${{ inputs.fingerprint-version }}
+        INPUT_POOL_MAPPING_VERSION: ${{ inputs.pool-mapping-version }}
+        INPUT_POLICY_VERSION: ${{ inputs.policy-version }}
         INPUT_COLLECTOR_MODE: hook
         INPUT_OUTPUT_PATH: ci-telemetry/nuget-cache-observation.json
       run: node "$env:GITHUB_ACTION_PATH/../emit-cache-observation/emit-cache-observation.mjs"

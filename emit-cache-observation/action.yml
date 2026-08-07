@@ -52,7 +52,7 @@ inputs:
   policy-version:
     description: Knowledge-Hub CI policy version.
     required: false
-    default: local-first-shadow-v4.6.6-r4
+    default: local-first-shadow-v4.6.9-r5
   collector-mode:
     description: Collector source for the observation.
     required: false

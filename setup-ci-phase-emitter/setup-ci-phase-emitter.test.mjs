@@ -10,7 +10,7 @@ const validInput = {
   sourceManifestSha256: "a".repeat(64),
   fingerprintVersion: "10",
   poolMappingVersion: "11",
-  policyVersion: "local-first-shadow-v4.6.6-r4",
+  policyVersion: "local-first-shadow-v4.6.9-r5",
   selectedLane: "deploy",
 };
 

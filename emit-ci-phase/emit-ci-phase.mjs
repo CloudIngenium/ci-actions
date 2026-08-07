@@ -254,7 +254,7 @@ async function main() {
       jobId: args.get("job-id"),
       fingerprintVersion: args.get("fingerprint-version") || "10",
       poolMappingVersion: args.get("pool-mapping-version") || "11",
-      policyVersion: args.get("policy-version") || "local-first-shadow-v4.6.6-r4",
+      policyVersion: args.get("policy-version") || "local-first-shadow-v4.6.9-r5",
       collectorMode: args.get("collector-mode") || "hook",
       selectedLane: args.get("selected-lane"),
       traceId: args.get("trace-id"),
