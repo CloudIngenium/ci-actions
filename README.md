@@ -224,8 +224,11 @@ second payload format. Run `setup-ci-phase-emitter` once after
 `resolve-job-context`; it exports the SHA-pinned Node entrypoint and contract
 versions as `CI_PHASE_EMITTER`, `CI_CONTROL_V4_MANIFEST_SHA256`,
 `CI_FINGERPRINT_VERSION`, `CI_POOL_MAPPING_VERSION`, `CI_POLICY_VERSION`, and
-`CI_SELECTED_LANE`. Product scripts invoke that entrypoint with the same
-arguments documented above and append canonical events under `RUNNER_TEMP`.
+`CI_SELECTED_LANE`. It also exports the action runner's managed Node runtime as
+`CI_NODE_EXECUTABLE` and adds its directory to subsequent steps' `PATH`, so
+deploy runners do not need a separate Node installation. Product scripts invoke
+that entrypoint with the same arguments documented above and append canonical
+events under `RUNNER_TEMP`.
 
 ## Exact .NET and persistent NuGet
 

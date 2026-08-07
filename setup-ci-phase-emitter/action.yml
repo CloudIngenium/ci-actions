@@ -25,39 +25,9 @@ inputs:
 outputs:
   emitter-path:
     description: Absolute path to the canonical Node emitter.
-    value: ${{ steps.setup.outputs.emitter-path }}
+  node-path:
+    description: Absolute path to the runner-managed Node executable used by the emitter.
 
 runs:
-  using: composite
-  steps:
-    - id: setup
-      shell: pwsh
-      env:
-        INPUT_SOURCE_MANIFEST_SHA256: ${{ inputs.source-manifest-sha256 }}
-        INPUT_FINGERPRINT_VERSION: ${{ inputs.fingerprint-version }}
-        INPUT_POOL_MAPPING_VERSION: ${{ inputs.pool-mapping-version }}
-        INPUT_POLICY_VERSION: ${{ inputs.policy-version }}
-        INPUT_SELECTED_LANE: ${{ inputs.selected-lane }}
-      run: |
-        $ErrorActionPreference = 'Stop'
-        if ($env:INPUT_SOURCE_MANIFEST_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
-          throw 'source-manifest-sha256 must be 64 hexadecimal characters.'
-        }
-        if ($env:INPUT_FINGERPRINT_VERSION -notmatch '^[1-9][0-9]{0,5}$' -or
-            $env:INPUT_POOL_MAPPING_VERSION -notmatch '^[1-9][0-9]{0,5}$') {
-          throw 'fingerprint and pool mapping versions must be positive integers.'
-        }
-        if ($env:INPUT_POLICY_VERSION -notmatch '^[a-z0-9][a-z0-9._-]{2,63}$') {
-          throw 'policy-version is invalid.'
-        }
-        $emitter = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_ACTION_PATH '../emit-ci-phase/emit-ci-phase.mjs'))
-        if (-not (Test-Path -LiteralPath $emitter -PathType Leaf)) {
-          throw "Canonical CI phase emitter is missing: $emitter"
-        }
-        "CI_PHASE_EMITTER=$emitter" >> $env:GITHUB_ENV
-        "CI_CONTROL_V4_MANIFEST_SHA256=$($env:INPUT_SOURCE_MANIFEST_SHA256.ToLowerInvariant())" >> $env:GITHUB_ENV
-        "CI_FINGERPRINT_VERSION=$env:INPUT_FINGERPRINT_VERSION" >> $env:GITHUB_ENV
-        "CI_POOL_MAPPING_VERSION=$env:INPUT_POOL_MAPPING_VERSION" >> $env:GITHUB_ENV
-        "CI_POLICY_VERSION=$env:INPUT_POLICY_VERSION" >> $env:GITHUB_ENV
-        "CI_SELECTED_LANE=$env:INPUT_SELECTED_LANE" >> $env:GITHUB_ENV
-        "emitter-path=$emitter" >> $env:GITHUB_OUTPUT
+  using: node24
+  main: setup-ci-phase-emitter.mjs
