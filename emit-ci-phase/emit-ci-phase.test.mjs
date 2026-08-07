@@ -46,6 +46,8 @@ test("builds the exact Knowledge-Hub ci_phase v4 shape", () => {
     "selected_lane",
   ]);
   assert.equal(payload.event_type, "ci_phase");
+  assert.equal(payload.contract_version, "cloudingenium.ci-control/4");
+  assert.equal(payload.versions.contract_version, "cloudingenium.ci-control/4");
   assert.deepEqual(payload.identity, {
     repository: "CloudIngenium/Zap",
     run_id: "300000001",

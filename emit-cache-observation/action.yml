@@ -44,15 +44,15 @@ inputs:
   fingerprint-version:
     description: Knowledge-Hub fingerprint contract version.
     required: false
-    default: "9"
+    default: "10"
   pool-mapping-version:
     description: Knowledge-Hub pool mapping version.
     required: false
-    default: "10"
+    default: "11"
   policy-version:
     description: Knowledge-Hub CI policy version.
     required: false
-    default: local-first-shadow-v4.6.4-r3
+    default: local-first-shadow-v4.6.6-r4
   collector-mode:
     description: Collector source for the observation.
     required: false

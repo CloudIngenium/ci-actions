@@ -126,6 +126,12 @@ jobs:
           output-path: "runner-baseline-drift.json"
           fail-on-drift: "false"
 
+      - id: job-context
+        uses: ./resolve-job-context
+        with:
+          github-token: ${{ github.token }}
+          fail-on-unresolved: "true"
+
       - id: dotnet
         uses: ./setup-dotnet-nuget
         with:
@@ -133,12 +139,8 @@ jobs:
           global-json-file: "ci-action-fixture/global.json"
           sdk-setup-mode: "setup"
           cache-root: ${{ runner.temp }}/ci-actions-nuget
-
-      - id: job-context
-        uses: ./resolve-job-context
-        with:
-          github-token: ${{ github.token }}
-          fail-on-unresolved: "true"
+          job-id: ${{ steps.job-context.outputs.job-id }}
+          source-manifest-sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
       - id: phase
         uses: ./emit-ci-phase
@@ -176,7 +178,7 @@ jobs:
           if (-not (Test-Path -LiteralPath '${{ steps.dynamic-phase-emitter.outputs.emitter-path }}' -PathType Leaf)) {
             throw 'Dynamic phase emitter path was not exported.'
           }
-          if ($env:CI_FINGERPRINT_VERSION -ne '9' -or $env:CI_POOL_MAPPING_VERSION -ne '10' -or
+          if ($env:CI_FINGERPRINT_VERSION -ne '10' -or $env:CI_POOL_MAPPING_VERSION -ne '11' -or
               $env:CI_SELECTED_LANE -ne 'build-fast') {
             throw 'Dynamic phase emitter contract versions were not exported.'
           }
@@ -184,6 +186,11 @@ jobs:
           if ("${{ steps.baseline-drift.outputs.drifted }}" -ne "true") { throw "Expected baseline drift" }
           if ("${{ steps.baseline-drift.outputs.drift-count }}" -ne "1") { throw "Expected one drift reason" }
           if ("${{ steps.dotnet.outputs.sdk-version }}" -ne "10.0.302") { throw "Wrong SDK selected" }
+          if ("${{ steps.dotnet.outputs.cache-class }}" -notin @("warm", "cold")) { throw "NuGet cache class was not exact" }
+          if ("${{ steps.dotnet.outputs.telemetry-status }}" -ne "emitted") { throw "NuGet cache evidence was not emitted" }
+          if (-not (Test-Path -LiteralPath '${{ steps.dotnet.outputs.cache-observation-path }}' -PathType Leaf)) {
+            throw 'NuGet cache observation was not written.'
+          }
           if ("${{ steps.job-context.outputs.correlation-quality }}" -ne "exact") { throw "Job context was not exact" }
 
           $payload = Get-Content -Raw -LiteralPath "${{ steps.phase.outputs.payload-path }}"
