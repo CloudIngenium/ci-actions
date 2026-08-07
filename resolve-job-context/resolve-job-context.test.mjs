@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { resolveCurrentJobContext } from "./resolve-job-context.mjs";
+import { jobContextEnvironment, resolveCurrentJobContext } from "./resolve-job-context.mjs";
 
 const context = {
   repository: "CloudIngenium/Zap",
@@ -93,4 +93,18 @@ test("fails open with bounded reasons for missing auth and API errors", async ()
   });
   assert.equal(unauthorized.reason, "github_http_403");
   assert.equal(unauthorized.correlationQuality, "unavailable");
+});
+
+test("exports one correlation quality under canonical and compatibility environment names", () => {
+  for (const correlationQuality of ["exact", "unavailable"]) {
+    const environment = jobContextEnvironment({
+      jobId: correlationQuality === "exact" ? "1002" : "",
+      traceId: "0123456789abcdef0123456789abcdef",
+      correlationQuality,
+    });
+
+    assert.equal(environment.CI_JOB_CONTEXT_QUALITY, correlationQuality);
+    assert.equal(environment.CI_CORRELATION_QUALITY, correlationQuality);
+    assert.equal(environment.CI_JOB_ID, environment.GITHUB_JOB_ID);
+  }
 });

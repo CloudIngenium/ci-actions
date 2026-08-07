@@ -136,6 +136,16 @@ async function appendEnvironment(filePath, values) {
   await writeFile(filePath, `${lines}\n`, { encoding: "utf8", flag: "a" });
 }
 
+export function jobContextEnvironment(result) {
+  return {
+    GITHUB_JOB_ID: result.jobId,
+    CI_JOB_ID: result.jobId,
+    CI_TRACE_ID: result.traceId,
+    CI_JOB_CONTEXT_QUALITY: result.correlationQuality,
+    CI_CORRELATION_QUALITY: result.correlationQuality,
+  };
+}
+
 async function main() {
   const args = readArguments(process.argv.slice(2));
   const actionInput = (name, legacyName = name.replaceAll("-", "_")) =>
@@ -167,12 +177,10 @@ async function main() {
     reason: result.reason,
     "cache-hit": String(result.cacheHit),
   });
-  await appendEnvironment(args.get("github-env") || process.env.GITHUB_ENV, {
-    GITHUB_JOB_ID: result.jobId,
-    CI_JOB_ID: result.jobId,
-    CI_TRACE_ID: result.traceId,
-    CI_JOB_CONTEXT_QUALITY: result.correlationQuality,
-  });
+  await appendEnvironment(
+    args.get("github-env") || process.env.GITHUB_ENV,
+    jobContextEnvironment(result),
+  );
 
   if (result.correlationQuality !== "exact") {
     process.stdout.write(`::warning title=CI job context unavailable::${result.reason}; exact phase telemetry will be skipped.\n`);
