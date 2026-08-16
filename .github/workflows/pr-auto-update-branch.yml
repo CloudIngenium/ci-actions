@@ -1,0 +1,54 @@
+name: PR Auto-Update Branch
+
+# Added by scripts/rollout-pr-auto-update-branch.sh.
+#
+# This repo's default branch requires branches be up to date and has NO merge
+# queue. In that regime GitHub refuses to merge a branch that is behind and
+# nothing advances it, so an armed, green, conflict-free PR stalls forever.
+# Measured across the org 2026-08-13: 44 repos held a stalled PR and none of
+# them carried this caller.
+#
+# All rules, guards and orchestration live in Knowledge-Hub — this file is a
+# stub on purpose (git-workflow.md § 11: one name, one implementation).
+#
+#   Rules:    Knowledge-Hub/scripts/lib/pr-auto-update-eligibility.mjs
+#   Workflow: Knowledge-Hub/.github/workflows/pr-auto-update-branch-reusable.yml
+#
+# Disable without editing this file:
+#   gh variable set SKIP_AUTO_UPDATE_BRANCH --body true
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    # Staggered by repo slug — see workflow_body_for(). Do not flatten this to a
+    # shared literal: 60 callers on one minute is a 3-runner pool DoS.
+    - cron: "32 0/4 * * *"
+  workflow_dispatch:
+    inputs:
+      max-updates:
+        description: "Cap on update-branch calls for this run"
+        type: string
+        required: false
+        default: "3"
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write
+  statuses: read
+
+concurrency:
+  group: pr-auto-update-branch
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    uses: CloudIngenium/Knowledge-Hub/.github/workflows/pr-auto-update-branch-reusable.yml@ed0cd0726228311a3fc3421e83f1b6b4efa86aaa
+    with:
+      max-updates: ${{ fromJSON(github.event.inputs.max-updates || '3') }}
+      runs-on: '["self-hosted","Linux","X64","HQ","Ubuntu-24","Control-Fast"]'
+    secrets:
+      app-id: ${{ secrets.CLOUDINGENIUM_AUTOMATION_APP_ID }}
+      private-key: ${{ secrets.CLOUDINGENIUM_AUTOMATION_PRIVATE_KEY }}
