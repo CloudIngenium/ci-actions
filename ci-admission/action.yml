@@ -121,6 +121,26 @@ inputs:
     description: Bounded JSON object mapping package names to versions.
     required: false
     default: ""
+  record-commit:
+    description: Exact producer commit containing the native package-source/v2 record.
+    required: false
+    default: ""
+  record-api-path:
+    description: Immutable CloudIngenium contents API path for the native package-source/v2 record.
+    required: false
+    default: ""
+  record-blob-sha:
+    description: Full Git blob SHA for the native package-source/v2 record.
+    required: false
+    default: ""
+  record-digest:
+    description: SHA-256 of the exact native package-source/v2 record bytes.
+    required: false
+    default: ""
+  record-workflow-run-id:
+    description: Numeric producer publication workflow run ID embedded in the native record.
+    required: false
+    default: ""
   repositories:
     description: Comma or newline separated CloudIngenium repositories for fleet-currency-incremental.
     required: false

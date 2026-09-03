@@ -289,6 +289,35 @@ This artifact contract uses `schema_version: 1` and
 `schema_id: https://schemas.cloudingenium.com/ci-actions/release-manifest/v1`;
 it deliberately omits `contract_version` because it is not a KH CI event.
 
+## Native package source v2
+
+Shared-package publishers use `package-source-v2` only after publication,
+registry verification, tarball or `.nupkg` validation, SBOM generation,
+attestation, and an external canary have completed:
+
+```yaml
+- id: package-source
+  uses: CloudIngenium/ci-actions/package-source-v2@<full-commit-sha>
+  with:
+    catalog-path: standards/generated/package-source.json
+    source-path: standards/generated/package-source.json
+    source-blob-sha: ${{ steps.source-blob.outputs.sha }}
+    package-names-json: ${{ steps.release-set.outputs.names-json }}
+    release-evidence-path: ${{ runner.temp }}/release-evidence.json
+```
+
+The action has no network side effects. It validates the five required evidence
+classes, package ownership and maturity, exact source provenance, and stable
+adoption rules, then emits a canonical `cloudingenium.package-source/v2`
+record plus byte and content digests. The publisher stores that record as an
+immutable Git blob and transports only typed coordinates through
+`ci-admission`; Knowledge-Hub re-verifies the blob, registry, and evidence
+before it can create consumer work.
+
+`ci-admission` accepts the native record coordinates as one all-or-nothing
+group. Omitting the whole group remains supported only for the temporary v1
+reader window; partial or mutable coordinates fail closed.
+
 ## Ranged artifact download canary
 
 Use this action only as an explicit transport experiment after the producing

@@ -300,6 +300,11 @@ test("prequeue package source sends immutable typed evidence from the SSOT regis
     "INPUT_CONTENT-DIGEST": "f".repeat(64),
     "INPUT_PACKAGES-JSON": '["@cloudingenium/ci-actions"]',
     "INPUT_PACKAGE-VERSIONS-JSON": '{"@cloudingenium/ci-actions":"1.0.0"}',
+    "INPUT_RECORD-COMMIT": "c".repeat(40),
+    "INPUT_RECORD-API-PATH": `/repos/CloudIngenium/ci-actions/contents/.package-source/package-source.v2.json?ref=${"c".repeat(40)}`,
+    "INPUT_RECORD-BLOB-SHA": "d".repeat(40),
+    "INPUT_RECORD-DIGEST": "1".repeat(64),
+    "INPUT_RECORD-WORKFLOW-RUN-ID": "33710000000",
     "INPUT_PRIORITY-CLASS": "40",
     "INPUT_SLOT-WEIGHT": "2",
     "INPUT_REQUESTED-LANE": "Build-Fast",
@@ -313,9 +318,46 @@ test("prequeue package source sends immutable typed evidence from the SSOT regis
   assert.equal(body.client_payload.producer, "ci-actions");
   assert.equal(body.client_payload.digest_algorithm, "sha256");
   assert.deepEqual(body.client_payload.packages, ["@cloudingenium/ci-actions"]);
+  assert.equal(body.client_payload.record_commit, "c".repeat(40));
+  assert.equal(body.client_payload.record_blob_sha, "d".repeat(40));
+  assert.equal(body.client_payload.record_digest, "1".repeat(64));
+  assert.equal(body.client_payload.record_workflow_run_id, "33710000000");
   assert.equal(body.priority_class, 40);
   assert.equal(body.slot_weight, 2);
   assert.equal(body.requested_lane, "Build-Fast");
+});
+
+test("prequeue package source rejects partial or mutable native record coordinates", async () => {
+  const base = {
+    INPUT_OPERATION: "prequeue-defer",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
+    "INPUT_EVENT-TYPE": "package-source-published",
+    "INPUT_SOURCE-DIGEST": `sha256:${"e".repeat(64)}`,
+    INPUT_PRODUCER: "ci-actions",
+    INPUT_COMMIT: "a".repeat(40),
+    "INPUT_SOURCE-API-PATH": `/repos/CloudIngenium/ci-actions/contents/package-source.json?ref=${"a".repeat(40)}`,
+    INPUT_DIGEST: "f".repeat(64),
+    "INPUT_SOURCE-BLOB-SHA": "b".repeat(40),
+    "INPUT_DIGEST-ALGORITHM": "sha256",
+    "INPUT_CONTENT-DIGEST": "f".repeat(64),
+    "INPUT_PACKAGES-JSON": '["@cloudingenium/ci-actions"]',
+    "INPUT_PACKAGE-VERSIONS-JSON": '{"@cloudingenium/ci-actions":"1.0.0"}',
+    "INPUT_PRIORITY-CLASS": "40",
+    "INPUT_SLOT-WEIGHT": "2",
+    "INPUT_REQUESTED-LANE": "Build-Fast",
+  };
+  await assert.rejects(() => prequeueDefer(env({
+    ...base,
+    "INPUT_RECORD-DIGEST": "1".repeat(64),
+  })), /must be supplied together/);
+  await assert.rejects(() => prequeueDefer(env({
+    ...base,
+    "INPUT_RECORD-COMMIT": "c".repeat(40),
+    "INPUT_RECORD-API-PATH": "/repos/CloudIngenium/ci-actions/contents/record.json?ref=main",
+    "INPUT_RECORD-BLOB-SHA": "d".repeat(40),
+    "INPUT_RECORD-DIGEST": "1".repeat(64),
+    "INPUT_RECORD-WORKFLOW-RUN-ID": "33710000000",
+  })), /must bind the producer to the exact record commit/);
 });
 
 test("runAction keeps job-level and prequeue operations explicit", async () => {
