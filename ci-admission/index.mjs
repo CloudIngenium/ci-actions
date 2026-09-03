@@ -169,6 +169,16 @@ function boundedJson(text) {
   }
 }
 
+function safeApiErrorSuffix(body) {
+  const raw = body && typeof body === "object" ? body.error : null;
+  if (typeof raw !== "string") return "";
+  const message = raw.replace(/\s+/g, " ").trim();
+  if (!message || message.length > 200 || !/^[A-Za-z0-9 ._:/@()+,<>=-]+$/.test(message) || message.includes("::")) {
+    return "";
+  }
+  return `: ${message}`;
+}
+
 async function requestJson(url, token, options, fetchImpl) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -354,7 +364,7 @@ export async function prequeueDefer(env = process.env, fetchImpl = fetch) {
     fetchImpl,
   );
   if ((response.status !== 200 && response.status !== 202) || !UUID.test(body.dispatch_id || "") || !body.status) {
-    throw new Error(`CI prequeue defer failed with HTTP ${response.status}`);
+    throw new Error(`CI prequeue defer failed with HTTP ${response.status}${safeApiErrorSuffix(body)}`);
   }
   emitPrequeueOutputs(env, body);
   return body;
@@ -376,7 +386,7 @@ export async function prequeueStatus(env = process.env, fetchImpl = fetch) {
     fetchImpl,
   );
   if (!response.ok || body.dispatch_id !== dispatchId || !body.status) {
-    throw new Error(`CI prequeue status failed with HTTP ${response.status}`);
+    throw new Error(`CI prequeue status failed with HTTP ${response.status}${safeApiErrorSuffix(body)}`);
   }
   emitPrequeueOutputs(env, body);
   return body;
@@ -422,7 +432,7 @@ export async function acquire(env = process.env, fetchImpl = fetch) {
     );
   }
   if (!response.ok || body.granted !== true || !UUID.test(body.lease_id || "")) {
-    throw new Error(`CI admission acquire failed with HTTP ${response.status}`);
+    throw new Error(`CI admission acquire failed with HTTP ${response.status}${safeApiErrorSuffix(body)}`);
   }
 
   saveState(env, "lease_id", body.lease_id);
@@ -442,7 +452,7 @@ async function releaseLease(env, leaseId, endpoint, fetchImpl) {
     fetchImpl,
   );
   if (!response.ok || body.released !== true) {
-    throw new Error(`CI admission release failed with HTTP ${response.status}`);
+    throw new Error(`CI admission release failed with HTTP ${response.status}${safeApiErrorSuffix(body)}`);
   }
   return body;
 }
