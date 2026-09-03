@@ -280,6 +280,33 @@ function prequeueInput(env) {
     if (packages.size !== payload.packages.length || versionNames.length !== packages.size || versionNames.some((name) => !packages.has(name))) {
       throw new Error("package-versions-json must match packages-json exactly");
     }
+    const nativeRecordInputs = [
+      input(env, "RECORD-COMMIT"),
+      input(env, "RECORD-API-PATH"),
+      input(env, "RECORD-BLOB-SHA"),
+      input(env, "RECORD-DIGEST"),
+      input(env, "RECORD-WORKFLOW-RUN-ID"),
+    ];
+    if (nativeRecordInputs.some(Boolean) && !nativeRecordInputs.every(Boolean)) {
+      throw new Error("native package-source record inputs must be supplied together");
+    }
+    if (nativeRecordInputs.every(Boolean)) {
+      payload.record_commit = fullGitObjectId(nativeRecordInputs[0], "record-commit");
+      const recordApiPath = nativeRecordInputs[1];
+      const [recordResourcePath, recordQuery, ...recordExtra] = recordApiPath.split("?");
+      const recordRelativePath = recordResourcePath.slice(expectedPrefix.length);
+      if (!recordApiPath.startsWith(expectedPrefix) || !recordRelativePath
+        || recordRelativePath.split("/").some((segment) => !segment || segment === "." || segment === "..")
+        || recordExtra.length > 0 || recordQuery !== `ref=${payload.record_commit}`) {
+        throw new Error("record-api-path must bind the producer to the exact record commit");
+      }
+      payload.record_api_path = recordApiPath;
+      payload.record_blob_sha = gitBlobSha(nativeRecordInputs[2], "record-blob-sha");
+      payload.record_digest = exactSha256(nativeRecordInputs[3], "record-digest");
+      payload.record_workflow_run_id = String(boundedInteger(
+        nativeRecordInputs[4], "record-workflow-run-id", 1, Number.MAX_SAFE_INTEGER, null,
+      ));
+    }
   } else {
     payload.source_sha = fullGitObjectId(input(env, "SOURCE-SHA"));
     if (eventType === "zap-coverage-deferred") {

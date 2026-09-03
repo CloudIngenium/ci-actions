@@ -1,0 +1,55 @@
+name: Build native package-source v2
+description: Build a canonical package-source/v2 record from a committed source catalog and verified release evidence.
+
+inputs:
+  catalog-path:
+    description: Source catalog path relative to the workspace.
+    required: true
+  package-names-json:
+    description: JSON array of the packages verified by this publication.
+    required: true
+  release-evidence-path:
+    description: JSON file containing verified registry, artifact, SBOM, attestation, and canary evidence.
+    required: true
+  repository:
+    description: Exact producer repository.
+    required: false
+    default: ${{ github.repository }}
+  source-commit:
+    description: Exact commit containing the source catalog.
+    required: false
+    default: ${{ github.sha }}
+  source-path:
+    description: Repository-relative path of the source catalog.
+    required: true
+  source-blob-sha:
+    description: Exact Git blob SHA of the source catalog.
+    required: true
+  workflow-run-id:
+    description: Numeric publication workflow run ID.
+    required: false
+    default: ${{ github.run_id }}
+  occurred-at:
+    description: RFC 3339 record timestamp. Defaults to the action start time.
+    required: false
+    default: ""
+  output-path:
+    description: Record path relative to the workspace.
+    required: false
+    default: .package-source/package-source.v2.json
+
+outputs:
+  record-path:
+    description: Absolute path to the native v2 record.
+  record-id:
+    description: Canonical package-source record ID.
+  record-sha256:
+    description: SHA-256 of the exact record bytes.
+  content-sha256:
+    description: SHA-256 of the committed source catalog bytes.
+  package-versions-json:
+    description: Canonical package-to-version map for the verified package set.
+
+runs:
+  using: node24
+  main: index.mjs

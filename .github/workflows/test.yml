@@ -46,6 +46,7 @@ jobs:
           setup-ci-phase-emitter/action.contract.test.mjs
           setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
           release-manifest/release-manifest.test.mjs
+          package-source-v2/index.test.mjs
           download-ranged-artifact/download-ranged-artifact.test.mjs
           .github/workflows/dependabot-auto-merge.contract.test.mjs
           .github/workflows/socket-security.contract.test.mjs
