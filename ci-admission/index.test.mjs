@@ -233,6 +233,32 @@ test("prequeue defer sends only the typed allowlisted payload", async () => {
   assert.match(readFileSync(variables.GITHUB_OUTPUT, "utf8"), /dispatch-status=pending/);
 });
 
+test("prequeue failures expose only bounded single-line API errors", async () => {
+  const variables = env({
+    INPUT_OPERATION: "prequeue-defer",
+    "INPUT_EVENT-TYPE": "validate-skills-full",
+    GITHUB_REPOSITORY: "CloudIngenium/Knowledge-Hub",
+    "INPUT_SOURCE-DIGEST": `sha256:${"b".repeat(64)}`,
+    "INPUT_SOURCE-SHA": "a".repeat(40),
+    INPUT_SCOPE: "nightly",
+    "INPUT_REQUESTED-LANE": "Background",
+    "INPUT_PRIORITY-CLASS": "10",
+  });
+  await assert.rejects(
+    prequeueDefer(variables, async () => response(400, {
+      error: "client_payload.record_commit is not allowed for package-source-published",
+    })),
+    /HTTP 400: client_payload\.record_commit is not allowed/,
+  );
+  await assert.rejects(
+    prequeueDefer(variables, async () => response(400, {
+      error: "invalid\n::warning::token-value",
+    })),
+    (error) => error instanceof Error
+      && error.message === "CI prequeue defer failed with HTTP 400",
+  );
+});
+
 test("prequeue status uses the same bounded transport", async () => {
   const dispatchId = "77777777-7777-4777-8777-777777777777";
   const variables = env({ "INPUT_DISPATCH-ID": dispatchId });
