@@ -113,10 +113,30 @@ The starter supplies its admission token and per-intent capability in headers.
 The client does not publish evidence, record terminal proof, settle funds, or
 release a cloud reservation. It never retries a request automatically, follows
 redirects, or writes capabilities to action outputs/state. A transport error
-during claim is uncertain, not permission to start or release money. Only a
-fresh first-claim receipt, validated completely by the starter, may authorize
-one ARM call; an HTTP 200 alone is insufficient. Terminal and financial
-reconciliation remain independent authenticated publisher operations.
+during claim is uncertain, not permission to start or release money. Only the
+direct winning `claim` response can return start permission; an HTTP 200 alone
+is insufficient. The client rejects unknown or missing receipt/configuration
+keys, malformed UUIDs or ARM job paths, mismatched job/configuration hashes,
+unbounded resources, noncanonical UTC timestamps, future claims, and expired
+start windows. It validates `claimed_at`, the exact 30-second `start_before`
+window, and a lifecycle of at most 7,200 seconds that includes at least 60
+seconds beyond the replica timeout. CPU/memory must be 1/2,048 or 2/4,096 MiB,
+with one replica, one completion, and zero retries.
+
+`intent_hash` is SHA-256 of `JSON.stringify([repository, run_id, run_attempt,
+job_id])`; lease renewal does not change job identity. `configuration_hash`
+is SHA-256 of the recursively key-sorted configuration object's JSON, not of
+a JSON-encoded string. These hashes follow the Worker's durable claim contract.
+The response is bound to the request sent before awaiting transport, and
+expiry is checked after the response body is read. A starter must still journal
+its single ARM attempt durably and recheck expiry immediately before that
+attempt. A lost response never authorizes fetching or replaying permission.
+
+`status` may preserve a historical `reservation.start_receipt` for recovery,
+including expired deadlines, only with `start_permitted: false`. Start
+permission at any nested depth in a status or reserve response is rejected;
+a readonly receipt cannot be passed off as a new claim. Terminal proof and
+financial reconciliation remain independent authenticated publisher operations.
 
 No cloud feature flag, timer, resource, or workload is enabled by publishing
 this client. Consumers must use an exact reviewed commit and verify the schema

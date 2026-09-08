@@ -1,4 +1,5 @@
 import { appendFileSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_ENDPOINT = "https://gh-hooks.cloudingenium.com";
@@ -476,7 +477,97 @@ export async function explicitRelease(env = process.env, fetchImpl = fetch) {
   return result;
 }
 
-/** Starter-only cloud operations share the admission transport, without retries or state release. */
+const CLOUD_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const CLOUD_RECEIPT_KEYS = ["claimed", "start_permitted", "reservation_id", "receipt_id", "intent_hash", "target_id",
+  "policy_hash", "configuration_hash", "configuration", "claimed_at", "start_before", "execution_deadline_at"];
+const CLOUD_CONFIGURATION_KEYS = ["image_digest", "template_sha256", "cpu", "memory_mib", "replica_timeout_seconds",
+  "parallelism", "replica_completion_count", "replica_retry_limit"];
+
+function exactCloudObject(value, keys) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function cloudHash(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function cloudConfigurationHash(value) {
+  // Match the Worker's object hash, not the hash of a JSON-encoded string.
+  const canonical = JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+  return cloudHash(JSON.parse(canonical));
+}
+
+function cloudTimestamp(value) {
+  if (typeof value !== "string") return NaN;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? parsed : NaN;
+}
+
+function cloudJobTarget(value) {
+  if (typeof value !== "string") return false;
+  const parts = value.split("/");
+  return parts.length === 9 && parts[0] === "" && parts[1] === "subscriptions" && CLOUD_UUID.test(parts[2]) &&
+    parts[3] === "resourceGroups" && /^[A-Za-z0-9_.()-]{1,90}$/.test(parts[4]) && ![".", ".."].includes(parts[4]) &&
+    parts[5] === "providers" && parts[6] === "Microsoft.App" && parts[7] === "jobs" && /^[A-Za-z0-9-]+$/.test(parts[8]);
+}
+
+function validateCloudClaim(body, expectedIntentHash) {
+  if (body.start_permitted === false) {
+    if (!exactCloudObject(body, ["claimed", "start_permitted", "reason"]) || body.claimed !== false ||
+        typeof body.reason !== "string" || !/^[a-z][a-z0-9_]{0,99}$/.test(body.reason)) {
+      throw new Error("invalid cloud claim response");
+    }
+    return;
+  }
+  if (!exactCloudObject(body, CLOUD_RECEIPT_KEYS) || body.claimed !== true ||
+      typeof body.reservation_id !== "string" || !CLOUD_UUID.test(body.reservation_id) ||
+      typeof body.receipt_id !== "string" || !CLOUD_UUID.test(body.receipt_id) || !cloudJobTarget(body.target_id) ||
+      ["intent_hash", "policy_hash", "configuration_hash"].some((key) =>
+        typeof body[key] !== "string" || !/^[a-f0-9]{64}$/.test(body[key])) || body.intent_hash !== expectedIntentHash) {
+    throw new Error("invalid cloud claim receipt");
+  }
+  const config = body.configuration;
+  if (!exactCloudObject(config, CLOUD_CONFIGURATION_KEYS) ||
+      typeof config.image_digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(config.image_digest) ||
+      typeof config.template_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(config.template_sha256) ||
+      ![1, 2].includes(config.cpu) || config.memory_mib !== config.cpu * 2048 ||
+      !Number.isSafeInteger(config.replica_timeout_seconds) || config.replica_timeout_seconds <= 0 ||
+      config.replica_timeout_seconds > 7200 || config.parallelism !== 1 ||
+      config.replica_completion_count !== 1 || config.replica_retry_limit !== 0 ||
+      cloudConfigurationHash(config) !== body.configuration_hash) {
+    throw new Error("invalid cloud claim receipt");
+  }
+  const claimedAt = cloudTimestamp(body.claimed_at);
+  const startBefore = cloudTimestamp(body.start_before);
+  const deadline = cloudTimestamp(body.execution_deadline_at);
+  const now = Date.now();
+  if (![claimedAt, startBefore, deadline, now].every(Number.isFinite) || claimedAt > now ||
+      startBefore !== claimedAt + 30_000 || now >= startBefore || deadline <= startBefore ||
+      deadline > claimedAt + 7_200_000 || deadline - claimedAt < (config.replica_timeout_seconds + 60) * 1000) {
+    throw new Error("invalid cloud claim receipt");
+  }
+}
+
+function validateReadonlyCloudResponse(body) {
+  // Status may include the durable receipt for recovery, never replayable permission.
+  const pending = [body];
+  while (pending.length) {
+    const item = pending.pop();
+    if (item === null || typeof item !== "object") continue;
+    for (const [key, value] of Object.entries(item)) {
+      if (key === "start_permitted" && value !== false) throw new Error("invalid cloud admission response");
+      if (value !== null && typeof value === "object") pending.push(value);
+    }
+  }
+}
+
+/**
+ * Starter-only transport with strict direct-claim receipts and no retries or state release.
+ * A caller must durably journal its sole ARM attempt and recheck expiry before using a receipt.
+ * Status and reserve responses are diagnostic only, including any historical receipt.
+ */
 export async function cloudOperation({ operation, intent, capability, token, endpoint }, fetchImpl = fetch) {
   if (!["reserve", "claim", "status"].includes(operation)) {
     throw new Error("cloud starter operation must be reserve, claim, or status");
@@ -496,6 +587,8 @@ export async function cloudOperation({ operation, intent, capability, token, end
     throw new Error("cloud admission credentials or lease are invalid");
   }
   const origin = validateEndpoint(endpoint);
+  // Bind the response to the sent identity even if a caller mutates its input while awaiting fetch.
+  const expectedIntentHash = cloudHash([intent.repository, intent.run_id, intent.run_attempt, intent.job_id]);
   const url = new URL(`${origin}/v1/ci-admission/cloud/${operation}`);
   if (operation === "status") url.search = new URLSearchParams(intent).toString();
   let result;
@@ -517,9 +610,8 @@ export async function cloudOperation({ operation, intent, capability, token, end
       (operation !== "claim" && body.start_permitted)) {
     throw new Error("invalid cloud admission response");
   }
-  if (operation === "claim" && body.start_permitted && body.claimed !== true) {
-    throw new Error("invalid cloud claim response");
-  }
+  if (operation === "claim") validateCloudClaim(body, expectedIntentHash);
+  else validateReadonlyCloudResponse(body);
   return body;
 }
 
