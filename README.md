@@ -100,6 +100,28 @@ Worker links them to the `pull_request` webhook and counts the PR until it
 closes. Workflow callers receive only the dedicated `CI_ADMISSION_TOKEN`, never
 the broader gh-hooks query/Copilot token.
 
+### Cloud starter client
+
+The `cloudOperation` export in `ci-admission/index.mjs` reuses the same bounded,
+authenticated transport for `reserve`, `claim`, and `status`. It is a library
+entry point for the authorized starter, not a new workflow mode or controller.
+Its intent contains only repository, numeric run/attempt/job IDs, and the exact
+admission lease UUID. Resources, prices, funding and target configuration come
+from the server's authorized policy and evidence, never caller overrides.
+
+The starter supplies its admission token and per-intent capability in headers.
+The client does not publish evidence, record terminal proof, settle funds, or
+release a cloud reservation. It never retries a request automatically, follows
+redirects, or writes capabilities to action outputs/state. A transport error
+during claim is uncertain, not permission to start or release money. Only a
+fresh first-claim receipt, validated completely by the starter, may authorize
+one ARM call; an HTTP 200 alone is insufficient. Terminal and financial
+reconciliation remain independent authenticated publisher operations.
+
+No cloud feature flag, timer, resource, or workload is enabled by publishing
+this client. Consumers must use an exact reviewed commit and verify the schema
+and disabled-by-default server interface before operational use.
+
 ## Detect CI scope
 
 Resolve a bounded three-dot Git diff into canonical changed files, optional

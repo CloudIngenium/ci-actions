@@ -476,6 +476,53 @@ export async function explicitRelease(env = process.env, fetchImpl = fetch) {
   return result;
 }
 
+/** Starter-only cloud operations share the admission transport, without retries or state release. */
+export async function cloudOperation({ operation, intent, capability, token, endpoint }, fetchImpl = fetch) {
+  if (!["reserve", "claim", "status"].includes(operation)) {
+    throw new Error("cloud starter operation must be reserve, claim, or status");
+  }
+  const keys = ["repository", "run_id", "run_attempt", "job_id", "admission_lease_id"];
+  if (!intent || typeof intent !== "object" || Array.isArray(intent) ||
+      Object.keys(intent).length !== keys.length || keys.some((key) => typeof intent[key] !== "string")) {
+    throw new Error("cloud intent must contain only exact job and admission identities");
+  }
+  exactRepository(intent.repository);
+  for (const key of ["run_id", "run_attempt", "job_id"]) {
+    if (!/^[1-9][0-9]{0,15}$/.test(intent[key])) throw new Error("cloud job identity must be numeric");
+  }
+  if (!UUID.test(intent.admission_lease_id) || typeof capability !== "string" ||
+      !/^[a-f0-9-]{72}$/.test(capability) || typeof token !== "string" || token.length > 4096 ||
+      !/^[A-Za-z0-9._~+/-]+=*$/.test(token)) {
+    throw new Error("cloud admission credentials or lease are invalid");
+  }
+  const origin = validateEndpoint(endpoint);
+  const url = new URL(`${origin}/v1/ci-admission/cloud/${operation}`);
+  if (operation === "status") url.search = new URLSearchParams(intent).toString();
+  let result;
+  try {
+    result = await requestJson(url.toString(), token, {
+      method: operation === "status" ? "GET" : "POST",
+      redirect: "error",
+      headers: { "x-ci-cloud-capability": capability },
+      ...(operation === "status" ? {} : { body: JSON.stringify({ intent }) }),
+    }, fetchImpl);
+  } catch {
+    // Fetch/header/parser errors can include credentials or response content.
+    throw new Error(`cloud admission ${operation} transport uncertain`);
+  }
+  const { response, body } = result;
+  // Never reflect publisher payloads, bearer credentials or capabilities into logs.
+  if (!response.ok) throw new Error(`cloud admission ${operation} failed with HTTP ${response.status}`);
+  if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.start_permitted !== "boolean" ||
+      (operation !== "claim" && body.start_permitted)) {
+    throw new Error("invalid cloud admission response");
+  }
+  if (operation === "claim" && body.start_permitted && body.claimed !== true) {
+    throw new Error("invalid cloud claim response");
+  }
+  return body;
+}
+
 export async function runAction(env = process.env, fetchImpl = fetch) {
   const post = env.STATE_is_post === "true";
   if (post) return await release(env, fetchImpl);

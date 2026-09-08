@@ -36,6 +36,7 @@ jobs:
           contract-versions.test.mjs
           lib/contract.test.mjs
           ci-admission/index.test.mjs
+          ci-admission/cloud.test.mjs
           detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
           setup-node-pnpm/cache-evidence.test.mjs
