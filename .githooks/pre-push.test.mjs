@@ -13,7 +13,21 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const hook = readFileSync(join(root, ".githooks/pre-push"), "utf8");
 const runner = readFileSync(join(root, ".githooks/run-contract-tests.mjs"), "utf8");
 const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
-const selection = hook.match(/^CONTRACT_TESTS=\(\n([\s\S]*?)^\)/m)?.[1].trim().split(/\s+/);
+const canonicalEol = (source) => source.replace(/\r\n/g, "\n");
+function hookSelection(source) {
+  const block = canonicalEol(source).match(/^CONTRACT_TESTS=\(\n([\s\S]*?)^\)/m)?.[1];
+  assert.ok(block, "hook contract selection must remain explicitly discoverable");
+  return block.trim().split(/\s+/);
+}
+function ciSelection(source) {
+  const command = canonicalEol(source).match(/      - name: Test action contracts\n        shell: bash\n        run: >-\n([\s\S]*?)(?=\n      - name:)/)?.[1];
+  assert.ok(command, "CI contract step must remain explicitly discoverable");
+  const [node, flag, ...files] = command.trim().split(/\s+/);
+  assert.equal(node, "node");
+  assert.equal(flag, "--test");
+  return files;
+}
+const selection = hookSelection(hook);
 const bash = process.platform === "win32"
   ? join(process.env.ProgramFiles, "Git", "bin", "bash.exe") : "bash";
 
@@ -27,11 +41,7 @@ function discoverTests(directory, prefix = "") {
 }
 
 test("pre-push selection exactly matches CI and every contract, including hidden files", () => {
-  const command = workflow.match(/      - name: Test action contracts\n        shell: bash\n        run: >-\n([\s\S]*?)(?=\n      - name:)/)?.[1];
-  assert.ok(command, "CI contract step must remain explicitly discoverable");
-  const [node, flag, ...ciTests] = command.trim().split(/\s+/);
-  assert.equal(node, "node");
-  assert.equal(flag, "--test");
+  const ciTests = ciSelection(workflow);
   assert.ok(selection?.length > 0);
   assert.equal(new Set(ciTests).size, ciTests.length);
   assert.deepEqual(selection, ciTests);
@@ -40,6 +50,23 @@ test("pre-push selection exactly matches CI and every contract, including hidden
   assert.ok(ciTests.includes(".github/workflows/socket-security.contract.test.mjs"));
   assert.ok(existsSync(join(root, ".githooks/history-regression.mjs")), "real local security integration is required separately from Node-only CI");
   assert.match(readFileSync(join(root, "README.md"), "utf8"), /node \.githooks\/history-regression\.mjs/);
+});
+
+test("LF and CRLF parsing preserves exact contract selection and rejects semantic drift", () => {
+  for (const eol of ["\n", "\r\n"]) {
+    const hookText = canonicalEol(hook).replace(/\n/g, eol);
+    const ciText = canonicalEol(workflow).replace(/\n/g, eol);
+    assert.deepEqual(hookSelection(hookText), selection);
+    assert.deepEqual(ciSelection(ciText), selection);
+    assert.throws(() => ciSelection(ciText.replace("node --test", "node --check")));
+    assert.throws(() => hookSelection(hookText.replace("CONTRACT_TESTS=(", "EMPTY_SELECTION=(")));
+    assert.notDeepEqual(ciSelection(ciText.replace("          ci-admission/cloud.test.mjs", "          omitted.test.mjs")), selection);
+  }
+});
+
+test("only the executable native hook requires LF checkout", () => {
+  assert.equal(canonicalEol(readFileSync(join(root, ".gitattributes"), "utf8")).trim(), "/.githooks/pre-push text eol=lf");
+  assert.doesNotMatch(hook, /\r/);
 });
 
 function put(path, content, executable = false) {
@@ -81,6 +108,8 @@ function fixture(t) {
     return result.stdout.trim();
   };
   git("init", `--template=${emptyTemplate}`);
+  git("config", "core.autocrlf", "true");
+  put(join(main, ".gitattributes"), readFileSync(join(root, ".gitattributes"), "utf8"));
   put(join(main, ".githooks/pre-push"), hook, true);
   put(join(main, ".githooks/run-contract-tests.mjs"), runner);
   for (const file of selection) {
@@ -100,6 +129,8 @@ test(${JSON.stringify(`real contract ${file}`)}, () => {
   git("add", ".");
   git("commit", "-m", "Fixture contract gate");
   git("worktree", "add", "-b", "fixture-linked", linked);
+  assert.doesNotMatch(readFileSync(join(linked, ".githooks/pre-push"), "utf8"), /\r/);
+  assert.match(readFileSync(join(linked, ".githooks/run-contract-tests.mjs"), "utf8"), /\r\n/);
   const head = git("rev-parse", "HEAD");
   const update = `${head} ${head} refs/heads/publication ${"0".repeat(40)}\n`;
   const originalHook = join(main, ".git/hooks/pre-push");
