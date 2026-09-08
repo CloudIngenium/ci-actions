@@ -13,8 +13,9 @@ as it is on GitHub-hosted images and CloudIngenium runner baselines.
 This package-free repository uses the versioned `.githooks/pre-push`, not the
 generic Node installer that requires `package.json`. The gate requires Node 24
 and gitleaks, resolves `infra-iac/hooks/lib/checks.sh` beside the main ci-actions
-clone through Git's common directory, and runs its `pipeline_security` before
-the complete Node contract suite. Missing security, missing tests, failures,
+clone through Git's common directory, and runs its `pipeline_security`, a real
+gitleaks history scan, and then the complete Node contract suite. Missing
+security, missing tests, failures,
 empty test files, skips and TODOs fail closed. No dependencies, transport,
 installation or bypass options are added.
 
@@ -22,11 +23,41 @@ installation or bypass options are added.
 parity test rejects missing, duplicated or unlisted contracts, including hidden
 workflow tests. The test runner uses Node's structured results to require a
 real passing test in every selected file, rather than accepting an empty file's
-automatic success. Validate without installing by running:
+automatic success. The separately named local security integration requires
+real gitleaks and the canonical security library; it is not part of Node-only
+Linux/Windows CI and never silently skips missing prerequisites:
 
 ```bash
-bash .githooks/pre-push
+node .githooks/history-regression.mjs
 ```
+
+That regression commits a synthetic token only in a merge resolution and then
+deletes it, proves the clean-index
+scan misses it, then requires history rejection for existing and new branches.
+Portable CI contracts test the advertised-ref protocol and scanner failures
+with a recording test double; they do not claim to test real secret detection.
+
+Git and the canonical repair wrapper pass advertised refs on stdin unchanged.
+Direct validation must supply the same freshly verified identities, not rely
+on an upstream fallback. `REMOTE_HEAD` is the exact advertised commit, or forty
+zeroes only for a confirmed new remote branch:
+
+```bash
+: "${REMOTE_REF:?full verified refs/heads/name required}"
+: "${REMOTE_HEAD:?freshly verified remote commit required}"
+head=$(git rev-parse --verify HEAD)
+printf '%s %s %s %s\n' "$head" "$head" "$REMOTE_REF" "$REMOTE_HEAD" |
+  bash .githooks/pre-push
+```
+
+The gate rejects empty/TTY input, incomplete input after two seconds, non-HEAD
+sources, shallow history, unavailable/non-ancestor bases and duplicate
+destinations. Existing
+branches scan the exact base-to-HEAD range; new branches scan all reachable
+history, including merge resolution diffs. At most 16 updates and 500 total
+commits are accepted, with a 60-second
+scanner timeout per range. Oversized history fails, never truncates to green.
+No remote fetch, tracking-ref guess, lease or permission override is involved.
 
 First-time bootstrap requires independent review and a separate, isolated
 publication clone; a linked worktree of the shared checkout is **not** isolated

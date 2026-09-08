@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
   realpathSync, rmSync, writeFileSync,
@@ -38,6 +38,8 @@ test("pre-push selection exactly matches CI and every contract, including hidden
   assert.deepEqual([...ciTests].sort(), discoverTests(root).sort());
   assert.ok(ciTests.includes(".github/workflows/dependabot-auto-merge.contract.test.mjs"));
   assert.ok(ciTests.includes(".github/workflows/socket-security.contract.test.mjs"));
+  assert.ok(existsSync(join(root, ".githooks/history-regression.mjs")), "real local security integration is required separately from Node-only CI");
+  assert.match(readFileSync(join(root, "README.md"), "utf8"), /node \.githooks\/history-regression\.mjs/);
 });
 
 function put(path, content, executable = false) {
@@ -70,8 +72,8 @@ function fixture(t) {
   });
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   env[pathKey] = `${bin}${process.platform === "win32" ? ";" : ":"}${env[pathKey]}`;
-  const execute = (command, args, cwd = main) => spawnSync(command, args, {
-    cwd, env, encoding: "utf8", timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
+  const execute = (command, args, cwd = main, input) => spawnSync(command, args, {
+    cwd, env, input, encoding: "utf8", timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
   });
   const git = (...args) => {
     const result = execute("git", args);
@@ -94,16 +96,18 @@ test(${JSON.stringify(`real contract ${file}`)}, () => {
 `);
   }
   put(security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n");
-  put(join(bin, "gitleaks"), "#!/usr/bin/env bash\nexit 0\n", true);
+  put(join(bin, "gitleaks"), "#!/usr/bin/env bash\nprintf 'history:%s\\n' \"$*\" >> \"$CONTRACT_LOG\"\n", true);
   git("add", ".");
   git("commit", "-m", "Fixture contract gate");
   git("worktree", "add", "-b", "fixture-linked", linked);
+  const head = git("rev-parse", "HEAD");
+  const update = `${head} ${head} refs/heads/publication ${"0".repeat(40)}\n`;
   const originalHook = join(main, ".git/hooks/pre-push");
   put(originalHook, "#!/usr/bin/env bash\nprintf 'original hook must survive\\n'\n", true);
   const originalConfig = readFileSync(join(main, ".git/config"), "utf8");
   return {
-    main, linked, security, bin, execute,
-    invoke: (cwd = main) => execute(bash, [".githooks/pre-push"], cwd),
+    main, linked, security, bin, execute, git, head, update, env,
+    invoke: (cwd = main, input = update) => execute(bash, [".githooks/pre-push"], cwd, input),
     lines: () => existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [],
     unchanged: () => {
       assert.equal(readFileSync(join(main, ".git/config"), "utf8"), originalConfig);
@@ -119,7 +123,8 @@ for (const topology of ["main", "linked"]) {
     const result = f.invoke(f[topology]);
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.equal(f.lines()[0], "security");
-    assert.deepEqual(f.lines().slice(1).sort(), selection.map((file) => `test:${file}`).sort());
+    assert.equal(f.lines()[1], `history:git --redact --no-banner --timeout 60 --log-opts=--full-history --diff-merges=first-parent ${f.head} .`);
+    assert.deepEqual(f.lines().slice(2).sort(), selection.map((file) => `test:${file}`).sort());
     assert.match(result.stdout, new RegExp(`# tests ${selection.length}\\b`));
     f.unchanged();
   });
@@ -171,4 +176,82 @@ test("test runner rejects empty, duplicate, missing and escaping selections", (t
     assert.deepEqual(f.lines(), []);
   }
   f.unchanged();
+});
+
+test("existing branches scan the exact advertised ancestor range, not the index", (t) => {
+  const f = fixture(t);
+  put(join(f.main, "change.txt"), "committed change\n");
+  f.git("add", "change.txt");
+  f.git("commit", "-m", "Outgoing change");
+  const head = f.git("rev-parse", "HEAD");
+  const result = f.invoke(f.main, `HEAD ${head} refs/heads/publication ${f.head}\n`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(f.lines()[1], `history:git --redact --no-banner --timeout 60 --log-opts=--full-history --diff-merges=first-parent ${f.head}..${head} .`);
+  assert.equal(f.git("status", "--porcelain"), "");
+  f.unchanged();
+});
+
+test("all advertised destinations are scanned before contracts", (t) => {
+  const f = fixture(t);
+  const result = f.invoke(f.main, f.update + f.update.replace("refs/heads/publication", "refs/heads/second"));
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(f.lines().slice(0, 3), ["security", ...Array(2).fill(`history:git --redact --no-banner --timeout 60 --log-opts=--full-history --diff-merges=first-parent ${f.head} .`)]);
+});
+
+test("empty, malformed, unrelated, unavailable and oversized updates fail closed", (t) => {
+  const f = fixture(t);
+  const unrelated = f.git("commit-tree", `${f.head}^{tree}`, "-m", "Unrelated root");
+  const zero = "0".repeat(40);
+  const invalid = [
+    "", "\n", f.update.trim(), `HEAD ${f.head}\n`, f.update + "extra\n",
+    f.update.replace(f.head, "--all"), f.update.replace(`${f.head} ${f.head}`, `HEAD ${zero}`),
+    f.update.replace("refs/heads/publication", "refs/tags/publication"),
+    f.update.replace("refs/heads/publication", "refs/heads/bad..ref"),
+    f.update.replace(zero, "a".repeat(40)), f.update.replace(zero, unrelated),
+    f.update.replace(zero, f.head), f.update + f.update,
+    f.update.replace(f.head, "x".repeat(4097)),
+    Array.from({ length: 17 }, (_, i) => f.update.replace("publication", `branch-${i}`)).join(""),
+  ];
+  for (const input of invalid) {
+    const result = f.invoke(f.linked, input);
+    assert.notEqual(result.status, 0, JSON.stringify(input.slice(0, 180)));
+    assert.deepEqual(f.lines(), [], "invalid ranges must not run security or contracts");
+  }
+  f.unchanged();
+});
+
+test("history scanner failure propagates without running contracts", (t) => {
+  const f = fixture(t);
+  put(join(f.bin, "gitleaks"), "#!/usr/bin/env bash\nprintf 'history-failed\\n' >> \"$CONTRACT_LOG\"\nexit 29\n", true);
+  const result = f.invoke(f.linked);
+  assert.equal(result.status, 29);
+  assert.deepEqual(f.lines(), ["security", "history-failed"]);
+  f.unchanged();
+});
+
+test("shallow history cannot authorize a partial scan", (t) => {
+  const f = fixture(t);
+  put(join(f.main, ".git/shallow"), `${f.head}\n`);
+  const result = f.invoke(f.linked);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /complete history is required/);
+  assert.deepEqual(f.lines(), []);
+});
+
+test("an open stdin pipe fails within the bounded read deadline", async (t) => {
+  const f = fixture(t);
+  const child = spawn(bash, [".githooks/pre-push"], { cwd: f.linked, env: f.env, timeout: 5000 });
+  let stderr = "";
+  child.stdout.resume();
+  child.stderr.on("data", (data) => { stderr += data; });
+  child.stdin.on("error", () => {});
+  const closed = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (status, signal) => resolve({ status, signal }));
+  });
+  child.stdin.write(f.update); // Intentionally no EOF: must not authorize a partial batch.
+  const result = await closed;
+  assert.deepEqual(result, { status: 1, signal: null });
+  assert.match(stderr, /timed-out advertised updates/);
+  assert.deepEqual(f.lines(), []);
 });
