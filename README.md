@@ -8,6 +8,76 @@ All new actions use only the Node.js standard library. The Linux paths use
 `bash`; Windows paths use `pwsh`. A Node.js CLI must be available on the runner,
 as it is on GitHub-hosted images and CloudIngenium runner baselines.
 
+## Local pre-push gate
+
+This package-free repository uses the versioned `.githooks/pre-push`, not the
+generic Node installer that requires `package.json`. The gate requires Node 24
+and gitleaks, resolves `infra-iac/hooks/lib/checks.sh` beside the main ci-actions
+clone through Git's common directory, and runs its `pipeline_security`, a real
+gitleaks history scan, and then the complete Node contract suite. Missing
+security, missing tests, failures,
+empty test files, skips and TODOs fail closed. No dependencies, transport,
+installation or bypass options are added.
+
+`.github/workflows/test.yml` is the authoritative contract selection. The hook
+parity test rejects missing, duplicated or unlisted contracts, including hidden
+workflow tests. The test runner uses Node's structured results to require a
+real passing test in every selected file, rather than accepting an empty file's
+automatic success. The separately named local security integration requires
+real gitleaks and the canonical security library; it is not part of Node-only
+Linux/Windows CI and never silently skips missing prerequisites:
+
+```bash
+node .githooks/history-regression.mjs
+```
+
+That regression commits a synthetic token only in a merge resolution and then
+deletes it, proves the clean-index
+scan misses it, then requires history rejection for existing and new branches.
+Portable CI contracts test the advertised-ref protocol and scanner failures
+with a recording test double; they do not claim to test real secret detection.
+
+Git and the canonical repair wrapper pass advertised refs on stdin unchanged.
+Direct validation must supply the same freshly verified identities, not rely
+on an upstream fallback. `REMOTE_HEAD` is the exact advertised commit, or forty
+zeroes only for a confirmed new remote branch:
+
+```bash
+: "${REMOTE_REF:?full verified refs/heads/name required}"
+: "${REMOTE_HEAD:?freshly verified remote commit required}"
+head=$(git rev-parse --verify HEAD)
+printf '%s %s %s %s\n' "$head" "$head" "$REMOTE_REF" "$REMOTE_HEAD" |
+  bash .githooks/pre-push
+```
+
+The gate rejects empty/TTY input, incomplete input after two seconds, non-HEAD
+sources, shallow history, unavailable/non-ancestor bases and duplicate
+destinations. Existing
+branches scan the exact base-to-HEAD range; new branches scan all reachable
+history, including merge resolution diffs. At most 16 updates and 500 total
+commits are accepted, with a 60-second
+scanner timeout per range. Oversized history fails, never truncates to green.
+No remote fetch, tracking-ref guess, lease or permission override is involved.
+
+First-time bootstrap requires independent review and a separate, isolated
+publication clone; a linked worktree of the shared checkout is **not** isolated
+because it shares the common hooks directory. Use this sequence only in that
+publication clone or a worktree belonging to it:
+
+1. Verify the reviewed commit, clean worktree, Node 24, gitleaks and the reviewed
+   sibling infra-iac security library. Run the gate directly and require success.
+2. Inspect `git config --show-origin --get-all core.hooksPath` and the common
+   hooks directory. If any hooks path is configured, or `hooks/pre-push` already
+   exists (including a broken symlink), stop and preserve the existing setup.
+3. After approval, use an atomic no-clobber filesystem operation to link the
+   reviewed `.githooks/pre-push` into that isolated clone's default
+   `hooks/pre-push`. For example, Node's `fs.symlinkSync` fails on an existing
+   destination; never remove or overwrite it to make setup succeed. Keep the
+   reviewed source worktree available while the link is installed.
+4. Re-run the installed gate and the normal ship guard. Do not change global,
+   shared or common Git configuration, replace any existing gate, or bypass the
+   ship guard. Source validation alone does not authorize installation or push.
+
 ## CI admission
 
 The action has two deliberately separate modes over the same authenticated
@@ -99,6 +169,48 @@ Bot PR producers pass `kind: bot_pr` and the exact future head ref as
 Worker links them to the `pull_request` webhook and counts the PR until it
 closes. Workflow callers receive only the dedicated `CI_ADMISSION_TOKEN`, never
 the broader gh-hooks query/Copilot token.
+
+### Cloud starter client
+
+The `cloudOperation` export in `ci-admission/index.mjs` reuses the same bounded,
+authenticated transport for `reserve`, `claim`, and `status`. It is a library
+entry point for the authorized starter, not a new workflow mode or controller.
+Its intent contains only repository, numeric run/attempt/job IDs, and the exact
+admission lease UUID. Resources, prices, funding and target configuration come
+from the server's authorized policy and evidence, never caller overrides.
+
+The starter supplies its admission token and per-intent capability in headers.
+The client does not publish evidence, record terminal proof, settle funds, or
+release a cloud reservation. It never retries a request automatically, follows
+redirects, or writes capabilities to action outputs/state. A transport error
+during claim is uncertain, not permission to start or release money. Only the
+direct winning `claim` response can return start permission; an HTTP 200 alone
+is insufficient. The client rejects unknown or missing receipt/configuration
+keys, malformed UUIDs or ARM job paths, mismatched job/configuration hashes,
+unbounded resources, noncanonical UTC timestamps, future claims, and expired
+start windows. It validates `claimed_at`, the exact 30-second `start_before`
+window, and a lifecycle of at most 7,200 seconds that includes at least 60
+seconds beyond the replica timeout. CPU/memory must be 1/2,048 or 2/4,096 MiB,
+with one replica, one completion, and zero retries.
+
+`intent_hash` is SHA-256 of `JSON.stringify([repository, run_id, run_attempt,
+job_id])`; lease renewal does not change job identity. `configuration_hash`
+is SHA-256 of the recursively key-sorted configuration object's JSON, not of
+a JSON-encoded string. These hashes follow the Worker's durable claim contract.
+The response is bound to the request sent before awaiting transport, and
+expiry is checked after the response body is read. A starter must still journal
+its single ARM attempt durably and recheck expiry immediately before that
+attempt. A lost response never authorizes fetching or replaying permission.
+
+`status` may preserve a historical `reservation.start_receipt` for recovery,
+including expired deadlines, only with `start_permitted: false`. Start
+permission at any nested depth in a status or reserve response is rejected;
+a readonly receipt cannot be passed off as a new claim. Terminal proof and
+financial reconciliation remain independent authenticated publisher operations.
+
+No cloud feature flag, timer, resource, or workload is enabled by publishing
+this client. Consumers must use an exact reviewed commit and verify the schema
+and disabled-by-default server interface before operational use.
 
 ## Detect CI scope
 

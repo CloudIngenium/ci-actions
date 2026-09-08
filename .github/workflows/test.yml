@@ -36,20 +36,24 @@ jobs:
           contract-versions.test.mjs
           lib/contract.test.mjs
           ci-admission/index.test.mjs
+          ci-admission/cloud.test.mjs
           detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
           setup-node-pnpm/cache-evidence.test.mjs
           emit-cache-observation/emit-cache-observation.test.mjs
           runner-baseline/runner-baseline.test.mjs
           resolve-job-context/resolve-job-context.test.mjs
+          resolve-job-context/action.contract.test.mjs
           emit-ci-phase/emit-ci-phase.test.mjs
           setup-ci-phase-emitter/action.contract.test.mjs
+          setup-ci-phase-emitter/setup-ci-phase-emitter.test.mjs
           setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
           release-manifest/release-manifest.test.mjs
           package-source-v2/index.test.mjs
           download-ranged-artifact/download-ranged-artifact.test.mjs
           .github/workflows/dependabot-auto-merge.contract.test.mjs
           .github/workflows/socket-security.contract.test.mjs
+          .githooks/pre-push.test.mjs
 
       - name: Create stale and fresh locks
         shell: bash

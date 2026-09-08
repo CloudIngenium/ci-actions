@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Repository-native gate for this dependency-free Node action repository.
+# Resolve shared security from git-common-dir; missing prerequisites fail closed.
+# This file never installs hooks, changes Git configuration, or honors skip flags.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+MAIN_ROOT="$(cd "$(dirname "$COMMON_DIR")" && pwd -P)"
+HOOKS_LIB="${MAIN_ROOT}/../infra-iac/hooks/lib/checks.sh"
+if [ ! -f "$HOOKS_LIB" ] || [ ! -r "$HOOKS_LIB" ]; then
+  printf 'ci-actions pre-push: shared security library unavailable: %s\n' "$HOOKS_LIB" >&2
+  exit 1
+fi
+command -v node >/dev/null
+if [ "$(node -p 'process.versions.node.split(".")[0]')" != 24 ]; then
+  printf 'ci-actions pre-push: Node 24 is required\n' >&2
+  exit 1
+fi
+if ! command -v gitleaks >/dev/null; then
+  printf 'ci-actions pre-push: gitleaks is required for shared security\n' >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+# Git (and the canonical repair wrapper) supplies advertised updates. Never infer
+# a range from a stale tracking ref or wait for input from an interactive terminal.
+if [ -t 0 ]; then
+  printf 'ci-actions pre-push: advertised updates are required on stdin\n' >&2
+  exit 1
+fi
+HEAD_SHA="$(git rev-parse --verify 'HEAD^{commit}')"
+[ "$(git rev-parse --is-shallow-repository)" = false ] || { printf 'ci-actions pre-push: complete history is required\n' >&2; exit 1; }
+RANGES=()
+REMOTE_REFS=()
+total_commits=0
+while :; do
+  update=''
+  read_status=0
+  IFS= read -r -t 2 -n 4097 update || read_status=$?
+  if [ "$read_status" -ne 0 ]; then
+    if [ "$read_status" -ne 1 ] || [ -n "$update" ]; then
+      printf 'ci-actions pre-push: incomplete or timed-out advertised updates\n' >&2
+      exit 1
+    fi
+    break
+  fi
+  if [ "${#update}" -gt 4096 ] || [ "${#RANGES[@]}" -ge 16 ]; then
+    printf 'ci-actions pre-push: advertised updates exceed gate limits\n' >&2
+    exit 1
+  fi
+  read -r local_ref local_sha remote_ref remote_sha extra <<< "$update"
+  if [ -n "${extra:-}" ] || ! [[ "$local_sha" =~ ^[a-f0-9]{40}$ && "$remote_sha" =~ ^[a-f0-9]{40}$ ]] \
+    || [ "$local_sha" != "$HEAD_SHA" ] || [[ "$remote_ref" != refs/heads/* ]]; then
+    printf 'ci-actions pre-push: invalid advertised branch update or non-HEAD source\n' >&2
+    exit 1
+  fi
+  git check-ref-format "$remote_ref"
+  if [ "$local_ref" != "$local_sha" ] && [ "$local_ref" != HEAD ]; then
+    [[ "$local_ref" == refs/heads/* ]] || { printf 'ci-actions pre-push: invalid local ref\n' >&2; exit 1; }
+    git check-ref-format "$local_ref"
+  fi
+  [ "$(git rev-parse --verify --end-of-options "${local_ref}^{commit}")" = "$local_sha" ]
+  for previous in "${REMOTE_REFS[@]}"; do
+    [ "$previous" != "$remote_ref" ] || { printf 'ci-actions pre-push: duplicate advertised destination\n' >&2; exit 1; }
+  done
+  REMOTE_REFS+=("$remote_ref")
+  if [ "$remote_sha" = 0000000000000000000000000000000000000000 ]; then
+    range="$local_sha" # A new branch can publish any reachable ancestor.
+  else
+    [ "$(git cat-file -t "$remote_sha")" = commit ]
+    git merge-base --is-ancestor "$remote_sha" "$local_sha"
+    range="$remote_sha..$local_sha"
+  fi
+  count="$(git rev-list --max-count=501 "$range" -- | wc -l)"
+  total_commits=$((total_commits + count))
+  if [ "$count" -lt 1 ] || [ "$total_commits" -gt 500 ]; then
+    printf 'ci-actions pre-push: empty or oversized outgoing history; independent review required\n' >&2
+    exit 1
+  fi
+  RANGES+=("$range")
+done
+[ "${#RANGES[@]}" -gt 0 ] || { printf 'ci-actions pre-push: advertised updates are required\n' >&2; exit 1; }
+
+# shellcheck source=/dev/null
+source "$HOOKS_LIB"
+declare -F pipeline_security >/dev/null
+pipeline_security
+for range in "${RANGES[@]}"; do
+  gitleaks git --redact --no-banner --timeout 60 --log-opts="--full-history --diff-merges=first-parent $range" .
+done
+[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ]
+bash -n .githooks/pre-push
+node --check .githooks/run-contract-tests.mjs
+
+# CI's Test action contracts step is authoritative. pre-push.test.mjs enforces
+# exact parity and complete discovery, including the hidden workflow contracts.
+CONTRACT_TESTS=(
+  contract-versions.test.mjs
+  lib/contract.test.mjs
+  ci-admission/index.test.mjs
+  ci-admission/cloud.test.mjs
+  detect-ci-scope/detect-ci-scope.test.mjs
+  setup-node-pnpm/resolve-pnpm-version.test.mjs
+  setup-node-pnpm/cache-evidence.test.mjs
+  emit-cache-observation/emit-cache-observation.test.mjs
+  runner-baseline/runner-baseline.test.mjs
+  resolve-job-context/resolve-job-context.test.mjs
+  resolve-job-context/action.contract.test.mjs
+  emit-ci-phase/emit-ci-phase.test.mjs
+  setup-ci-phase-emitter/action.contract.test.mjs
+  setup-ci-phase-emitter/setup-ci-phase-emitter.test.mjs
+  setup-dotnet-nuget/setup-dotnet-nuget.test.mjs
+  release-manifest/release-manifest.test.mjs
+  package-source-v2/index.test.mjs
+  download-ranged-artifact/download-ranged-artifact.test.mjs
+  .github/workflows/dependabot-auto-merge.contract.test.mjs
+  .github/workflows/socket-security.contract.test.mjs
+  .githooks/pre-push.test.mjs
+)
+node .githooks/run-contract-tests.mjs "${CONTRACT_TESTS[@]}"
+[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ]

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { main, resolveSetup } from "./setup-ci-phase-emitter.mjs";
@@ -31,7 +32,7 @@ test("writes bounded environment, output, and PATH command files", () => {
     "INPUT_POOL-MAPPING-VERSION": validInput.poolMappingVersion,
     "INPUT_POLICY-VERSION": validInput.policyVersion,
     "INPUT_SELECTED-LANE": validInput.selectedLane,
-    GITHUB_ACTION_PATH: path.dirname(new URL(import.meta.url).pathname),
+    GITHUB_ACTION_PATH: path.dirname(fileURLToPath(import.meta.url)),
     GITHUB_ENV: path.join(root, "env"),
     GITHUB_OUTPUT: path.join(root, "output"),
     GITHUB_PATH: path.join(root, "path"),
@@ -40,6 +41,7 @@ test("writes bounded environment, output, and PATH command files", () => {
   assert.match(readFileSync(environment.GITHUB_ENV, "utf8"), /CI_NODE_EXECUTABLE=/u);
   assert.match(readFileSync(environment.GITHUB_OUTPUT, "utf8"), /node-path=/u);
   assert.equal(readFileSync(environment.GITHUB_PATH, "utf8").trim(), path.dirname(process.execPath));
+  assert.ok(readFileSync(environment.GITHUB_OUTPUT, "utf8").includes(`emitter-path=${path.resolve(environment.GITHUB_ACTION_PATH, "../emit-ci-phase/emit-ci-phase.mjs")}`));
 });
 
 test("rejects command-file injection and noncanonical versions", () => {
