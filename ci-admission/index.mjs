@@ -170,6 +170,45 @@ function boundedJson(text) {
   }
 }
 
+async function readBoundedJson(response, signal) {
+  if (!response.body) return boundedJson("");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  let cancelled = false;
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    // Cleanup must not extend the request deadline if the peer never settles it.
+    void reader.cancel().catch(() => {});
+  };
+  const readChunk = () => new Promise((resolve, reject) => {
+    const finish = (settle, value) => {
+      signal.removeEventListener("abort", onAbort);
+      settle(value);
+    };
+    const onAbort = () => finish(reject, new Error("CI admission request timed out"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    else reader.read().then((value) => finish(resolve, value), (error) => finish(reject, error));
+  });
+  try {
+    while (true) {
+      const { done, value } = await readChunk();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) throw new Error("CI admission response exceeded 32 KiB");
+      if (value.byteLength) chunks.push(value);
+    }
+    return boundedJson(new TextDecoder().decode(Buffer.concat(chunks, size)));
+  } catch (error) {
+    cancel();
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function safeApiErrorSuffix(body) {
   const raw = body && typeof body === "object" ? body.error : null;
   if (typeof raw !== "string") return "";
@@ -194,7 +233,7 @@ async function requestJson(url, token, options, fetchImpl) {
       },
       signal: controller.signal,
     });
-    const body = boundedJson(await response.text());
+    const body = await readBoundedJson(response, controller.signal);
     return { response, body };
   } finally {
     clearTimeout(timeout);

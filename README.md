@@ -179,6 +179,12 @@ Its intent contains only repository, numeric run/attempt/job IDs, and the exact
 admission lease UUID. Resources, prices, funding and target configuration come
 from the server's authorized policy and evidence, never caller overrides.
 
+The shared transport reads at most 32 KiB of response bytes before parsing JSON,
+including error responses. It cancels oversized or interrupted bodies without
+draining them. Its ten-second deadline covers both headers and body; peer
+cleanup cannot extend that deadline. Missing or misleading Content-Length does
+not change the limit. Valid UTF-8 split across chunks remains supported.
+
 The starter supplies its admission token and per-intent capability in headers.
 The client does not publish evidence, record terminal proof, settle funds, or
 release a cloud reservation. It never retries a request automatically, follows
