@@ -8,6 +8,45 @@ All new actions use only the Node.js standard library. The Linux paths use
 `bash`; Windows paths use `pwsh`. A Node.js CLI must be available on the runner,
 as it is on GitHub-hosted images and CloudIngenium runner baselines.
 
+## Local pre-push gate
+
+This package-free repository uses the versioned `.githooks/pre-push`, not the
+generic Node installer that requires `package.json`. The gate requires Node 24
+and gitleaks, resolves `infra-iac/hooks/lib/checks.sh` beside the main ci-actions
+clone through Git's common directory, and runs its `pipeline_security` before
+the complete Node contract suite. Missing security, missing tests, failures,
+empty test files, skips and TODOs fail closed. No dependencies, transport,
+installation or bypass options are added.
+
+`.github/workflows/test.yml` is the authoritative contract selection. The hook
+parity test rejects missing, duplicated or unlisted contracts, including hidden
+workflow tests. The test runner uses Node's structured results to require a
+real passing test in every selected file, rather than accepting an empty file's
+automatic success. Validate without installing by running:
+
+```bash
+bash .githooks/pre-push
+```
+
+First-time bootstrap requires independent review and a separate, isolated
+publication clone; a linked worktree of the shared checkout is **not** isolated
+because it shares the common hooks directory. Use this sequence only in that
+publication clone or a worktree belonging to it:
+
+1. Verify the reviewed commit, clean worktree, Node 24, gitleaks and the reviewed
+   sibling infra-iac security library. Run the gate directly and require success.
+2. Inspect `git config --show-origin --get-all core.hooksPath` and the common
+   hooks directory. If any hooks path is configured, or `hooks/pre-push` already
+   exists (including a broken symlink), stop and preserve the existing setup.
+3. After approval, use an atomic no-clobber filesystem operation to link the
+   reviewed `.githooks/pre-push` into that isolated clone's default
+   `hooks/pre-push`. For example, Node's `fs.symlinkSync` fails on an existing
+   destination; never remove or overwrite it to make setup succeed. Keep the
+   reviewed source worktree available while the link is installed.
+4. Re-run the installed gate and the normal ship guard. Do not change global,
+   shared or common Git configuration, replace any existing gate, or bypass the
+   ship guard. Source validation alone does not authorize installation or push.
+
 ## CI admission
 
 The action has two deliberately separate modes over the same authenticated
