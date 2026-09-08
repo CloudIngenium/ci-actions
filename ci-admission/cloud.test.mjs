@@ -131,6 +131,118 @@ test("invalid or oversized replies never authorize a start", async () => {
   await assert.rejects(cloudOperation({ ...options, operation: "claim" }, async () => Response.json({ start_permitted: true })), /invalid cloud claim/);
 });
 
+for (const status of [200, 503]) {
+  test(`streamed HTTP ${status} reply stops at the byte limit without draining or retrying`, async () => {
+    let calls = 0;
+    let pulls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls <= 2) controller.enqueue(new Uint8Array(32769));
+        else controller.close();
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    await assert.rejects(cloudOperation(options, async () => {
+      calls += 1;
+      return new Response(stream, { status, headers: { "content-length": "1" } });
+    }), { message: "cloud admission reserve transport uncertain" });
+    assert.equal(calls, 1);
+    assert.equal(pulls, 1, "must not drain a reply that already exceeds the cap");
+    assert.equal(cancelled, true);
+  });
+}
+
+test("stream byte limit preserves exact-boundary JSON with split UTF-8", async () => {
+  const prefix = JSON.stringify({ start_permitted: false, detail: "\u00e9" }).slice(0, -2);
+  const bytes = new TextEncoder().encode(prefix + "x".repeat(32768 - Buffer.byteLength(prefix) - 2) + '"}');
+  assert.equal(bytes.byteLength, 32768);
+  const split = bytes.indexOf(0xc3) + 1;
+  let pulls = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      if (pulls === 1) controller.enqueue(bytes.slice(0, split));
+      else if (pulls === 2) controller.enqueue(bytes.slice(split));
+      else controller.close();
+    },
+  }, { highWaterMark: 0 });
+  const result = await cloudOperation(options, async () => new Response(stream));
+  assert.equal(result.start_permitted, false);
+  assert.equal(result.detail[0], "\u00e9");
+  assert.equal(pulls, 3);
+});
+
+test("body deadline cancels a stalled stream even after response headers arrive", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now });
+  let calls = 0;
+  let cancelled = false;
+  let reading;
+  const started = new Promise((resolve) => { reading = resolve; });
+  const stream = new ReadableStream({
+    pull() { reading(); },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 });
+  const pending = cloudOperation({ ...options, operation: "claim" }, async () => {
+    calls += 1;
+    return new Response(stream);
+  });
+  const rejected = assert.rejects(pending, { message: "cloud admission claim transport uncertain" });
+  await started;
+  t.mock.timers.tick(10_000);
+  await rejected;
+  assert.equal(cancelled, true);
+  assert.equal(calls, 1);
+});
+
+for (const mode of ["reject", "never-settle"]) {
+  test(`oversized body remains bounded when stream cancellation can ${mode}`, async () => {
+    let calls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) { controller.enqueue(new Uint8Array(32769)); },
+      cancel() {
+        cancelled = true;
+        return mode === "reject" ? Promise.reject(new Error(`${options.token} ${capability}`)) : new Promise(() => {});
+      },
+    }, { highWaterMark: 0 });
+    await assert.rejects(cloudOperation(options, async () => {
+      calls += 1;
+      return new Response(stream);
+    }), { message: "cloud admission reserve transport uncertain" });
+    assert.equal(cancelled, true);
+    assert.equal(calls, 1);
+  });
+}
+
+test("streamed chunks are counted cumulatively, including multibyte data", async () => {
+  let pulls = 0;
+  let cancelled = false;
+  const stream = new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(new TextEncoder().encode("\u00e9".repeat(4097)));
+    },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 });
+  await assert.rejects(cloudOperation(options, async () => new Response(stream)),
+    { message: "cloud admission reserve transport uncertain" });
+  assert.equal(pulls, 4);
+  assert.equal(cancelled, true);
+});
+
+test("stream failure after headers does not leak credentials or replay a claim", async () => {
+  let calls = 0;
+  await assert.rejects(cloudOperation({ ...options, operation: "claim" }, async () => {
+    calls += 1;
+    return new Response(new ReadableStream({
+      pull(controller) { controller.error(new Error(`${options.token} ${capability}`)); },
+    }, { highWaterMark: 0 }));
+  }), { message: "cloud admission claim transport uncertain" });
+  assert.equal(calls, 1);
+});
+
 test("invalid header bytes are rejected before fetch without echoing credentials", async () => {
   for (const token of ["secret\0suffix", "secret\u007fsuffix", "secret\nsuffix", "secret\u0100suffix", "x".repeat(4097)]) {
     await assert.rejects(cloudOperation({ ...options, token }, () => assert.fail("must not contact API")), (error) => {
@@ -286,10 +398,13 @@ test("claim checks freshness after the response body finishes, not before the re
   let calls = 0;
   await assert.rejects(cloudOperation({ ...options, operation: "claim" }, async () => {
     calls += 1;
-    return { ok: true, status: 200, async text() {
-      t.mock.timers.setTime(Date.parse(receipt().start_before));
-      return JSON.stringify(receipt());
-    } };
+    return new Response(new ReadableStream({
+      pull(controller) {
+        t.mock.timers.setTime(Date.parse(receipt().start_before));
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(receipt())));
+        controller.close();
+      },
+    }, { highWaterMark: 0 }));
   }), /invalid cloud claim/);
   assert.equal(calls, 1);
 });
