@@ -105,9 +105,11 @@ while :; do
   RANGES+=("$range")
 done
 # Git lists no update when the push is already up to date, would be rejected as
-# non-fast-forward, or carries a stale lease. Refusing it publishes nothing.
+# non-fast-forward, or fails its lease (--force-with-lease, --force-if-includes). It
+# also lists none for a --mirror push that only deletes remote branches. Empty input
+# therefore cannot prove the push changes nothing, so it is refused, never passed.
 [ "${#RANGES[@]}" -gt 0 ] || {
-  printf 'ci-actions pre-push: advertised updates are required; git lists none when the push is already up to date, non-fast-forward, or holds a stale lease\n' >&2
+  printf 'ci-actions pre-push: advertised updates are required; git lists none when the push is already up to date, non-fast-forward, or holds a stale lease, and none for a --mirror push that only deletes, so empty input is refused\n' >&2
   exit 1
 }
 
