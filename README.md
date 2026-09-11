@@ -52,7 +52,11 @@ printf '%s %s %s %s\n' "$head" "$head" "$REMOTE_REF" "$REMOTE_HEAD" |
 
 The gate rejects empty/TTY input, incomplete input after two seconds, non-HEAD
 sources, shallow history, unavailable/non-ancestor bases and duplicate
-destinations. Existing
+destinations, and every refusal names its reason on stderr. A force push of
+rewritten history (after a rebase or amend) has a non-ancestor base: merge the
+remote tip into HEAD, or publish the rewrite as a new branch. Git advertises no
+update at all for a push that is already up to date, non-fast-forward, or
+holding a stale lease, so the gate refuses those as empty input. Existing
 branches scan the exact base-to-HEAD range; new branches scan all reachable
 history, including merge resolution diffs. At most 16 updates and 500 total
 commits are accepted, with a 60-second
