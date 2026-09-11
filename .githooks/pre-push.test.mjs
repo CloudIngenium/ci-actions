@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
-  realpathSync, rmSync, writeFileSync,
+  realpathSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -172,6 +172,12 @@ for (const failure of ["missing library", "missing function", "failed security",
     const result = f.invoke(f.linked);
     assert.notEqual(result.status, 0, result.stdout);
     if (failure === "failed security") assert.equal(result.status, 37);
+    const reason = {
+      "missing library": /shared security library unavailable/,
+      "missing function": /shared security library defines no pipeline_security/,
+      "wrong Node": /Node 24 is required/,
+    }[failure];
+    if (reason) assert.match(result.stderr, reason);
     assert.deepEqual(f.lines(), failure === "failed security" ? ["security"] : []);
     f.unchanged();
   });
@@ -229,27 +235,203 @@ test("all advertised destinations are scanned before contracts", (t) => {
   assert.deepEqual(f.lines().slice(0, 3), ["security", ...Array(2).fill(`history:git --redact --no-banner --timeout 60 --log-opts=--full-history --diff-merges=first-parent ${f.head} .`)]);
 });
 
-test("empty, malformed, unrelated, unavailable and oversized updates fail closed", (t) => {
+test("empty, malformed, unrelated, unavailable and oversized updates fail closed, each naming its reason", (t) => {
   const f = fixture(t);
   const unrelated = f.git("commit-tree", `${f.head}^{tree}`, "-m", "Unrelated root");
+  const tree = f.git("rev-parse", `${f.head}^{tree}`);
+  f.git("tag", "-a", "-m", "Fixture tag", "fixture-tag");
+  const tag = f.git("rev-parse", "fixture-tag");
   const zero = "0".repeat(40);
+  const malformed = /invalid advertised branch update or non-HEAD source/;
+  const limits = /advertised updates exceed gate limits/;
+  // A refusal under set -e can exit with nothing on stderr; git then prints only
+  // "failed to push some refs". Each row pins the reason, not just the status.
   const invalid = [
-    "", "\n", f.update.trim(), `HEAD ${f.head}\n`, f.update + "extra\n",
-    f.update.replace(f.head, "--all"), f.update.replace(`${f.head} ${f.head}`, `HEAD ${zero}`),
-    f.update.replace("refs/heads/publication", "refs/tags/publication"),
-    f.update.replace("refs/heads/publication", "refs/heads/bad..ref"),
-    f.update.replace(zero, "a".repeat(40)), f.update.replace(zero, unrelated),
-    f.update.replace(zero, f.head), f.update + f.update,
-    f.update.replace(f.head, "x".repeat(4097)),
-    Array.from({ length: 17 }, (_, i) => f.update.replace("publication", `branch-${i}`)).join(""),
+    ["", /advertised updates are required; git lists none/],
+    ["\n", malformed],
+    [f.update.trim(), /incomplete or timed-out advertised updates/],
+    [`HEAD ${f.head}\n`, malformed],
+    [f.update + "extra\n", malformed],
+    [f.update.replace(f.head, "--all"), /invalid local ref/],
+    // Passes the refs/heads/* shape test, so only check-ref-format can refuse it.
+    [f.update.replace(f.head, "refs/heads/fixture-linked~0"), /invalid local ref/],
+    [f.update.replace(f.head, "refs/heads/missing"), /advertised local ref does not name the advertised commit/],
+    [f.update.replace(`${f.head} ${f.head}`, `HEAD ${zero}`), malformed],
+    [f.update.replace("refs/heads/publication", "refs/tags/publication"), malformed],
+    [f.update.replace("refs/heads/publication", "refs/heads/bad..ref"), /invalid destination branch name/],
+    [f.update.replace(zero, "a".repeat(40)), /refs\/heads\/publication: remote tip a{12} is not in local history/],
+    [f.update.replace(zero, unrelated), new RegExp(`remote tip ${unrelated.slice(0, 12)} is not an ancestor of HEAD`)],
+    [f.update.replace(zero, tree), new RegExp(`remote tip ${tree.slice(0, 12)} is a tree, not a commit`)],
+    [f.update.replace(zero, tag), new RegExp(`remote tip ${tag.slice(0, 12)} is a tag, not a commit`)],
+    [f.update.replace(zero, f.head), /empty or oversized outgoing history/],
+    [f.update + f.update, /duplicate advertised destination/],
+    [f.update.replace(f.head, "x".repeat(4097)), limits],
+    [Array.from({ length: 17 }, (_, i) => f.update.replace("publication", `branch-${i}`)).join(""), limits],
   ];
-  for (const input of invalid) {
+  for (const [input, reason] of invalid) {
     const result = f.invoke(f.linked, input);
-    assert.notEqual(result.status, 0, JSON.stringify(input.slice(0, 180)));
+    const label = JSON.stringify(input.slice(0, 180));
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stderr, reason, `${label}: ${result.stderr}`);
     assert.deepEqual(f.lines(), [], "invalid ranges must not run security or contracts");
   }
   f.unchanged();
 });
+
+// The rows above feed stdin by hand. These drive a real `git push` through the
+// hook, so git itself decides which updates it advertises.
+function publication(t) {
+  const f = fixture(t);
+  const remote = join(dirname(dirname(f.main)), "publication.git");
+  f.git("init", "--bare", remote);
+  // Seeding runs the fixture's original hook, not the gate.
+  f.git("push", remote, "HEAD:refs/heads/publication");
+  const commit = (name) => {
+    put(join(f.main, `${name}.txt`), `${name}\n`);
+    f.git("add", `${name}.txt`);
+    f.git("commit", "-m", name);
+    return f.git("rev-parse", "HEAD");
+  };
+  return {
+    f, remote, commit,
+    push: (options, refspec) => f.execute("git", ["-c", "core.hooksPath=.githooks", "push", ...options, remote, refspec]),
+    tip: (ref = "refs/heads/publication") => f.git("--git-dir", remote, "rev-parse", "--verify", "--quiet", ref),
+  };
+}
+
+function rewritten(t) {
+  const p = publication(t);
+  const published = p.commit("published");
+  p.f.git("push", p.remote, "HEAD:refs/heads/publication");
+  p.f.git("reset", "--hard", p.f.head);
+  const rewrite = p.commit("rewrite");
+  return { ...p, published, rewrite };
+}
+
+test("a real fast-forward push scans exactly the published range", (t) => {
+  const p = publication(t);
+  const next = p.commit("forward");
+  const result = p.push([], "HEAD:refs/heads/publication");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(p.f.lines()[1], `history:git --redact --no-banner --timeout 60 --log-opts=--full-history --diff-merges=first-parent ${p.f.head}..${next} .`);
+  assert.equal(p.tip(), next);
+  p.f.unchanged();
+});
+
+for (const [shape, options, refspec] of [
+  ["--force", ["--force"], "HEAD:refs/heads/publication"],
+  ["--force-with-lease", null, "HEAD:refs/heads/publication"],
+  ["a +refspec", [], "+HEAD:refs/heads/publication"],
+]) {
+  test(`a real ${shape} push of rewritten history is refused with its reason`, (t) => {
+    const p = rewritten(t);
+    const result = p.push(options ?? [`--force-with-lease=refs/heads/publication:${p.published}`], refspec);
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, new RegExp(`refs/heads/publication: remote tip ${p.published.slice(0, 12)} is not an ancestor of HEAD`));
+    assert.match(result.stderr, /Merge the remote tip into HEAD, or publish the rewrite as a new branch/);
+    assert.deepEqual(p.f.lines(), [], "a refused rewrite must not run security or contracts");
+    assert.equal(p.tip(), p.published);
+    p.f.unchanged();
+  });
+}
+
+test("both remedies the rewrite refusal names are accepted by a real push", (t) => {
+  const p = rewritten(t);
+  const branch = p.push([], "HEAD:refs/heads/publication-rewrite");
+  assert.equal(branch.status, 0, `${branch.stdout}\n${branch.stderr}`);
+  assert.equal(p.tip("refs/heads/publication-rewrite"), p.rewrite);
+  p.f.git("merge", "--no-edit", p.published);
+  const merged = p.f.git("rev-parse", "HEAD");
+  const merge = p.push([], "HEAD:refs/heads/publication");
+  assert.equal(merge.status, 0, `${merge.stdout}\n${merge.stderr}`);
+  assert.equal(p.tip(), merged);
+  p.f.unchanged();
+});
+
+for (const shape of ["non-fast-forward", "stale lease", "up to date"]) {
+  test(`a real ${shape} push reaches the gate with no advertised update and says why`, (t) => {
+    const p = rewritten(t);
+    const result = {
+      "non-fast-forward": () => p.push([], "HEAD:refs/heads/publication"),
+      "stale lease": () => p.push([`--force-with-lease=refs/heads/publication:${p.f.head}`], "HEAD:refs/heads/publication"),
+      "up to date": () => p.push([], `${p.published}:refs/heads/publication`),
+    }[shape]();
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, /advertised updates are required; git lists none when the push is already up to date, non-fast-forward, or holds a stale lease/);
+    assert.deepEqual(p.f.lines(), []);
+    assert.equal(p.tip(), p.published);
+    p.f.unchanged();
+  });
+}
+
+test("a real --mirror push that only deletes reaches the gate with no advertised update and is refused", (t) => {
+  // Git omits a deletion with no local peer from pre-push stdin, so this push arrives
+  // empty. It is the reason empty input is refused rather than read as a no-op.
+  const p = publication(t);
+  p.f.git("push", "--mirror", p.remote); // Seeding runs the fixture's original hook.
+  p.f.git("--git-dir", p.remote, "update-ref", "refs/heads/doomed", p.f.head);
+  const result = p.f.execute("git", ["-c", "core.hooksPath=.githooks", "push", "--mirror", p.remote]);
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /and none for a --mirror push that only deletes, so empty input is refused/);
+  assert.deepEqual(p.f.lines(), []);
+  assert.equal(p.tip("refs/heads/doomed"), p.f.head);
+  p.f.unchanged();
+});
+
+for (const options of [[], ["--force"]]) {
+  test(`a real push over a remote tip never fetched is refused as unavailable (${options.join(" ") || "no force"})`, (t) => {
+    const p = rewritten(t);
+    const remoteOnly = p.f.git("--git-dir", p.remote, "commit-tree", `${p.published}^{tree}`, "-p", p.published, "-m", "Remote only");
+    p.f.git("--git-dir", p.remote, "update-ref", "refs/heads/publication", remoteOnly);
+    const result = p.push(options, "HEAD:refs/heads/publication");
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, new RegExp(`remote tip ${remoteOnly.slice(0, 12)} is not in local history; fetch and integrate it`));
+    assert.deepEqual(p.f.lines(), []);
+    assert.equal(p.tip(), remoteOnly);
+    p.f.unchanged();
+  });
+}
+
+test("a missing node is refused by name, not by a silent command-not-found exit", {
+  skip: process.platform === "win32" && "a node-less PATH is built from symlinks",
+}, (t) => {
+  const f = fixture(t);
+  // bash, git and dirname are all the hook runs before its Node check.
+  const nodeless = join(dirname(f.bin), "nodeless-bin");
+  mkdirSync(nodeless);
+  for (const tool of ["bash", "git", "dirname"]) {
+    const found = spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
+    assert.ok(found, `${tool} not found`);
+    symlinkSync(found, join(nodeless, tool));
+  }
+  const result = spawnSync(join(nodeless, "bash"), [".githooks/pre-push"], {
+    cwd: f.linked, env: { ...f.env, PATH: nodeless }, input: f.update, encoding: "utf8", timeout: 60_000,
+  });
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /Node 24 is required/);
+  assert.deepEqual(f.lines(), []);
+});
+
+for (const stage of ["history scan", "contracts"]) {
+  test(`HEAD moving during the ${stage} is refused by name`, (t) => {
+    const f = fixture(t);
+    const move = 'git commit -q --allow-empty -m "Moved while the gate ran"';
+    if (stage === "history scan") put(join(f.bin, "gitleaks"), `#!/usr/bin/env bash\n${move}\n`, true);
+    else put(join(f.linked, ".github/workflows/socket-security.contract.test.mjs"), `import { test } from "node:test";
+import { execSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+test("moves HEAD", () => {
+  appendFileSync(process.env.CONTRACT_LOG, "test:moved\\n");
+  execSync(${JSON.stringify(move)});
+});
+`);
+    const result = f.invoke(f.linked);
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, /HEAD moved while the gate ran/);
+    if (stage === "contracts") assert.ok(f.lines().includes("test:moved"), "the second check runs after the contracts");
+    f.unchanged();
+  });
+}
 
 test("history scanner failure propagates without running contracts", (t) => {
   const f = fixture(t);

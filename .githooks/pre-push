@@ -12,8 +12,7 @@ if [ ! -f "$HOOKS_LIB" ] || [ ! -r "$HOOKS_LIB" ]; then
   printf 'ci-actions pre-push: shared security library unavailable: %s\n' "$HOOKS_LIB" >&2
   exit 1
 fi
-command -v node >/dev/null
-if [ "$(node -p 'process.versions.node.split(".")[0]')" != 24 ]; then
+if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" != 24 ]; then
   printf 'ci-actions pre-push: Node 24 is required\n' >&2
   exit 1
 fi
@@ -55,12 +54,15 @@ while :; do
     printf 'ci-actions pre-push: invalid advertised branch update or non-HEAD source\n' >&2
     exit 1
   fi
-  git check-ref-format "$remote_ref"
+  # Every refusal names its reason: under set -e a bare failing test exits with
+  # nothing on stderr, and git then reports only "failed to push some refs".
+  git check-ref-format "$remote_ref" || { printf 'ci-actions pre-push: invalid destination branch name\n' >&2; exit 1; }
   if [ "$local_ref" != "$local_sha" ] && [ "$local_ref" != HEAD ]; then
     [[ "$local_ref" == refs/heads/* ]] || { printf 'ci-actions pre-push: invalid local ref\n' >&2; exit 1; }
-    git check-ref-format "$local_ref"
+    git check-ref-format "$local_ref" || { printf 'ci-actions pre-push: invalid local ref\n' >&2; exit 1; }
   fi
-  [ "$(git rev-parse --verify --end-of-options "${local_ref}^{commit}")" = "$local_sha" ]
+  [ "$(git rev-parse --verify --quiet --end-of-options "${local_ref}^{commit}")" = "$local_sha" ] \
+    || { printf 'ci-actions pre-push: advertised local ref does not name the advertised commit\n' >&2; exit 1; }
   for previous in "${REMOTE_REFS[@]}"; do
     [ "$previous" != "$remote_ref" ] || { printf 'ci-actions pre-push: duplicate advertised destination\n' >&2; exit 1; }
   done
@@ -68,8 +70,30 @@ while :; do
   if [ "$remote_sha" = 0000000000000000000000000000000000000000 ]; then
     range="$local_sha" # A new branch can publish any reachable ancestor.
   else
-    [ "$(git cat-file -t "$remote_sha")" = commit ]
-    git merge-base --is-ancestor "$remote_sha" "$local_sha"
+    remote_type="$(git cat-file -t "$remote_sha" 2>/dev/null)" || remote_type=''
+    if [ -z "$remote_type" ]; then
+      printf 'ci-actions pre-push: %s: remote tip %s is not in local history; fetch and integrate it, then push again\n' \
+        "$remote_ref" "${remote_sha:0:12}" >&2
+      exit 1
+    fi
+    if [ "$remote_type" != commit ]; then
+      printf 'ci-actions pre-push: %s: remote tip %s is a %s, not a commit\n' "$remote_ref" "${remote_sha:0:12}" "$remote_type" >&2
+      exit 1
+    fi
+    # Only a fast-forward has a base-to-HEAD range to scan, so rewritten history
+    # (a force push after a rebase or amend) is refused, never scanned as new.
+    ancestry=0
+    git merge-base --is-ancestor "$remote_sha" "$local_sha" || ancestry=$?
+    if [ "$ancestry" -eq 1 ]; then
+      printf 'ci-actions pre-push: %s: remote tip %s is not an ancestor of HEAD, so this push rewrites published history; the gate scans fast-forward ranges only. Merge the remote tip into HEAD, or publish the rewrite as a new branch\n' \
+        "$remote_ref" "${remote_sha:0:12}" >&2
+      exit 1
+    fi
+    if [ "$ancestry" -ne 0 ]; then
+      printf 'ci-actions pre-push: %s: could not compare remote tip %s with HEAD (merge-base exit %s)\n' \
+        "$remote_ref" "${remote_sha:0:12}" "$ancestry" >&2
+      exit 1
+    fi
     range="$remote_sha..$local_sha"
   fi
   count="$(git rev-list --max-count=501 "$range" -- | wc -l)"
@@ -80,16 +104,23 @@ while :; do
   fi
   RANGES+=("$range")
 done
-[ "${#RANGES[@]}" -gt 0 ] || { printf 'ci-actions pre-push: advertised updates are required\n' >&2; exit 1; }
+# Git lists no update when the push is already up to date, would be rejected as
+# non-fast-forward, or fails its lease (--force-with-lease, --force-if-includes). It
+# also lists none for a --mirror push that only deletes remote branches. Empty input
+# therefore cannot prove the push changes nothing, so it is refused, never passed.
+[ "${#RANGES[@]}" -gt 0 ] || {
+  printf 'ci-actions pre-push: advertised updates are required; git lists none when the push is already up to date, non-fast-forward, or holds a stale lease, and none for a --mirror push that only deletes, so empty input is refused\n' >&2
+  exit 1
+}
 
 # shellcheck source=/dev/null
 source "$HOOKS_LIB"
-declare -F pipeline_security >/dev/null
+declare -F pipeline_security >/dev/null || { printf 'ci-actions pre-push: shared security library defines no pipeline_security\n' >&2; exit 1; }
 pipeline_security
 for range in "${RANGES[@]}"; do
   gitleaks git --redact --no-banner --timeout 60 --log-opts="--full-history --diff-merges=first-parent $range" .
 done
-[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ]
+[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ] || { printf 'ci-actions pre-push: HEAD moved while the gate ran\n' >&2; exit 1; }
 bash -n .githooks/pre-push
 node --check .githooks/run-contract-tests.mjs
 
@@ -119,4 +150,4 @@ CONTRACT_TESTS=(
   .githooks/pre-push.test.mjs
 )
 node .githooks/run-contract-tests.mjs "${CONTRACT_TESTS[@]}"
-[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ]
+[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ] || { printf 'ci-actions pre-push: HEAD moved while the gate ran\n' >&2; exit 1; }
