@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { resolveIsolatedPnpmCacheEvidence } from "./cache-evidence.mjs";
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 
 test("isolated store is provably cold and content addressed by lock and toolchain", async () => {
-  const workspace = await mkdtemp(path.join(os.tmpdir(), "pnpm-cache-evidence-"));
+  const workspace = tmpFixture("pnpm-cache-evidence");
   await writeFile(path.join(workspace, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   const first = await resolveIsolatedPnpmCacheEvidence({
     workspace,
@@ -28,7 +28,7 @@ test("isolated store is provably cold and content addressed by lock and toolchai
 });
 
 test("cache key changes when lock content changes", async () => {
-  const workspace = await mkdtemp(path.join(os.tmpdir(), "pnpm-cache-evidence-"));
+  const workspace = tmpFixture("pnpm-cache-evidence");
   const lock = path.join(workspace, "pnpm-lock.yaml");
   await writeFile(lock, "lockfileVersion: '9.0'\n");
   const before = await resolveIsolatedPnpmCacheEvidence({ workspace, lockFile: "pnpm-lock.yaml", nodeVersion: "v24.5.0", pnpmVersion: "11.13.0" });
