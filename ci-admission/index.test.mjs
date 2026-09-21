@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 
 import {
   acquire,
@@ -20,7 +21,7 @@ test("declares the supported Node 24 action runtime", () => {
 });
 
 function env(overrides = {}) {
-  const root = mkdtempSync(join(tmpdir(), "ci-admission-action-"));
+  const root = tmpFixture("ci-admission-action");
   return {
     GITHUB_OUTPUT: join(root, "output"),
     GITHUB_STATE: join(root, "state"),

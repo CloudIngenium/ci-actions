@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
+
 import { resolvePnpmVersion } from "./resolve-pnpm-version.mjs";
 
 async function manifestWith(packageManager) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "ci-actions-pnpm-"));
+  const root = tmpFixture("ci-actions-pnpm");
   const manifest = path.join(root, "package.json");
   await writeFile(manifest, `${JSON.stringify({ packageManager })}\n`);
   return manifest;

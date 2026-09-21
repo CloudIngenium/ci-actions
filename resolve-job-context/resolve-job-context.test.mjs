@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
-import os from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 
 import { jobContextEnvironment, resolveCurrentJobContext } from "./resolve-job-context.mjs";
 
@@ -18,7 +19,7 @@ function response(jobs, status = 200) {
 }
 
 test("resolves the one in-progress job assigned to the current runner", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "job-context-"));
+  const root = tmpFixture("job-context");
   const cachePath = path.join(root, "context.json");
   const result = await resolveCurrentJobContext({
     apiUrl: "https://api.github.test",
@@ -40,7 +41,7 @@ test("resolves the one in-progress job assigned to the current runner", async ()
 });
 
 test("reuses only a cache bound to the same run attempt and runner", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "job-context-"));
+  const root = tmpFixture("job-context");
   const cachePath = path.join(root, "context.json");
   let calls = 0;
   const fetchImpl = async () => {
@@ -60,7 +61,7 @@ test("does not guess when the runner has zero or multiple in-progress candidates
     { id: 3001, status: "in_progress", runner_name: context.runnerName },
     { id: 3002, status: "in_progress", runner_name: context.runnerName },
   ]]) {
-    const root = await mkdtemp(path.join(os.tmpdir(), "job-context-"));
+    const root = tmpFixture("job-context");
     const result = await resolveCurrentJobContext({
       apiUrl: "https://api.github.test",
       token: "test-token",
@@ -74,7 +75,7 @@ test("does not guess when the runner has zero or multiple in-progress candidates
 });
 
 test("fails open with bounded reasons for missing auth and API errors", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "job-context-"));
+  const root = tmpFixture("job-context");
   const missing = await resolveCurrentJobContext({
     apiUrl: "https://api.github.test",
     token: "",

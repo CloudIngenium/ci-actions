@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 
 import { main, resolveSetup } from "./setup-ci-phase-emitter.mjs";
 
@@ -25,7 +26,7 @@ test("exports the runner-managed Node runtime with the canonical emitter", () =>
 });
 
 test("writes bounded environment, output, and PATH command files", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "ci-phase-setup-"));
+  const root = tmpFixture("ci-phase-setup");
   const environment = {
     "INPUT_SOURCE-MANIFEST-SHA256": validInput.sourceManifestSha256,
     "INPUT_FINGERPRINT-VERSION": validInput.fingerprintVersion,
