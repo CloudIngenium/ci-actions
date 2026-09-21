@@ -129,6 +129,7 @@ node --check .githooks/run-contract-tests.mjs
 CONTRACT_TESTS=(
   contract-versions.test.mjs
   lib/contract.test.mjs
+  lib/tmp-fixture.test.mjs
   ci-admission/index.test.mjs
   ci-admission/cloud.test.mjs
   detect-ci-scope/detect-ci-scope.test.mjs
