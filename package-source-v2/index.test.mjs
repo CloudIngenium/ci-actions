@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { actionInput, buildPackageSourceV2, createPackageSourceV2 } from "./index.mjs";
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 
 const occurredAt = "2026-09-03T03:05:00.000Z";
 const evidence = Object.fromEntries(["registry", "artifact", "sbom", "attestation", "canary"].map((name, index) => [
@@ -66,7 +66,7 @@ test("fails closed unless every release evidence class is verified", () => {
 });
 
 test("writes an atomic bounded record and exact package version map", async () => {
-  const workspace = await mkdtemp(path.join(tmpdir(), "package-source-v2-"));
+  const workspace = tmpFixture("package-source-v2");
   await mkdir(path.join(workspace, "standards"), { recursive: true });
   await writeFile(path.join(workspace, "standards/source.json"), `${JSON.stringify(catalog)}\n`);
   await writeFile(path.join(workspace, "evidence.json"), `${JSON.stringify(evidence)}\n`);
