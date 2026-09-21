@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 
 import { createReleaseManifest } from "./release-manifest.mjs";
 
 async function fixture() {
-  const workspace = await mkdtemp(path.join(os.tmpdir(), "ci-actions-release-"));
+  const workspace = tmpFixture("ci-actions-release");
   const root = path.join(workspace, "dist");
   await mkdir(path.join(root, "api"), { recursive: true });
   await writeFile(path.join(root, "index.html"), "hello\n");
