@@ -109,6 +109,13 @@ jobs:
             "$RUNNER_TEMP"/*) ;;
             *) echo "::error::PNPM_HOME is not job-scoped: $PNPM_HOME"; exit 1 ;;
           esac
+          # The store pnpm actually resolves, not the variable the action set:
+          # pnpm 11 ignored NPM_CONFIG_STORE_DIR and used the global default.
+          store="$(pnpm store path)"
+          case "$store" in
+            "$RUNNER_TEMP"/*) ;;
+            *) echo "::error::pnpm store is not job-scoped: $store"; exit 1 ;;
+          esac
 
       - name: Create cross-platform fixtures
         shell: pwsh
