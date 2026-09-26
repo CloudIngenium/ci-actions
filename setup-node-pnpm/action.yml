@@ -107,9 +107,16 @@ runs:
         rm -rf "$pnpm_root"
         mkdir -p "$pnpm_root"
         npm install --global --prefix "$pnpm_root" "pnpm@${PNPM_VERSION}"
+        # pnpm 11 reads PNPM_CONFIG_* only and ignores NPM_CONFIG_STORE_DIR, so
+        # without PNPM_CONFIG_STORE_DIR the "isolated" store fell through to the
+        # runner user's global pnpm config. On a self-hosted runner that is
+        # whatever another job wrote there last (Runner-Ubuntu-03g, 2026-09-26: a
+        # Knowledge-Hub job's deleted $RUNNER_TEMP store). NPM_CONFIG_STORE_DIR
+        # stays for pnpm 10 callers.
         {
           echo "PNPM_HOME=$pnpm_root/bin"
           echo "PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false"
+          echo "PNPM_CONFIG_STORE_DIR=$pnpm_root/store"
           echo "NPM_CONFIG_STORE_DIR=$pnpm_root/store"
         } >> "$GITHUB_ENV"
         echo "$pnpm_root/bin" >> "$GITHUB_PATH"
