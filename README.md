@@ -472,7 +472,7 @@ measurements show a 60-second or 30% improvement with zero retries.
 ```yaml
 - uses: CloudIngenium/ci-actions/setup-node-pnpm@<full-commit-sha>
   with:
-    node-version: "24"
+    node-version: "26"
     job-id: ${{ steps.job-context.outputs.job-id }}
     source-manifest-sha256: ${{ vars.CI_CONTROL_V4_MANIFEST_SHA256 }}
 ```

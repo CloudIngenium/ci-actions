@@ -97,8 +97,8 @@ jobs:
         shell: bash
         run: |
           case "$(node --version)" in
-            v24.*) ;;
-            *) echo "::error::Node 24 was not installed"; exit 1 ;;
+            v26.*) ;;
+            *) echo "::error::Node 26 (the default) was not installed"; exit 1 ;;
           esac
           test "$(pnpm --version)" = "11.13.0"
           test "${{ steps.node-pnpm.outputs['pnpm-version'] }}" = "11.13.0"
