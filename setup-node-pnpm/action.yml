@@ -25,7 +25,7 @@ inputs:
   node-version:
     description: Node.js version passed to actions/setup-node.
     required: false
-    default: "24"
+    default: "26"
   pnpm-version:
     description: Exact stable pnpm version override. By default the action reads packageManager.
     required: false
