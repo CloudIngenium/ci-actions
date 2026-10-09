@@ -1,4 +1,4 @@
-// Local integration regression: requires real Git, Bash, Node 24 and gitleaks.
+// Local integration regression: requires real Git, Bash, Node >= 24 and gitleaks.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
