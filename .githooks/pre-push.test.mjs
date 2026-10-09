@@ -175,7 +175,7 @@ for (const failure of ["missing library", "missing function", "failed security",
     const reason = {
       "missing library": /shared security library unavailable/,
       "missing function": /shared security library defines no pipeline_security/,
-      "wrong Node": /Node 24 is required/,
+      "wrong Node": /Node >= 24 is required/,
     }[failure];
     if (reason) assert.match(result.stderr, reason);
     assert.deepEqual(f.lines(), failure === "failed security" ? ["security"] : []);
@@ -408,7 +408,7 @@ test("a missing node is refused by name, not by a silent command-not-found exit"
     cwd: f.linked, env: { ...f.env, PATH: nodeless }, input: f.update, encoding: "utf8", timeout: 60_000,
   });
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /Node 24 is required/);
+  assert.match(result.stderr, /Node >= 24 is required/);
   assert.deepEqual(f.lines(), []);
 });
 
