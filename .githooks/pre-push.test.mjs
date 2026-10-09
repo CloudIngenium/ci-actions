@@ -161,7 +161,22 @@ for (const topology of ["main", "linked"]) {
   });
 }
 
-for (const failure of ["missing library", "missing function", "failed security", "invalid shell", "wrong Node"]) {
+test("a Node major above the floor passes the version check and runs every contract", (t) => {
+  const f = fixture(t);
+  // Report a future major for the hook's version probe; every other call runs the real Node.
+  const realNode = process.execPath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+  put(join(f.bin, "node"), `#!/usr/bin/env bash
+if [ "$1" = "-p" ]; then printf '99\\n'; exit 0; fi
+exec '${realNode}' "$@"
+`, true);
+  const result = f.invoke(f.linked);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.doesNotMatch(result.stderr, /Node >= 24 is required/);
+  assert.deepEqual(f.lines().slice(2).sort(), selection.map((file) => `test:${file}`).sort());
+  f.unchanged();
+});
+
+for (const failure of ["missing library", "missing function", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
   test(`hook fails closed before contracts: ${failure}`, (t) => {
     const f = fixture(t);
     if (failure === "missing library") rmSync(f.security);
@@ -169,13 +184,15 @@ for (const failure of ["missing library", "missing function", "failed security",
     if (failure === "failed security") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; return 37; }\n");
     if (failure === "invalid shell") put(f.security, "pipeline_security() {\n");
     if (failure === "wrong Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf '22\\n'\n", true);
+    if (failure === "non-numeric Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf 'v26\\n'\n", true);
     const result = f.invoke(f.linked);
     assert.notEqual(result.status, 0, result.stdout);
     if (failure === "failed security") assert.equal(result.status, 37);
     const reason = {
       "missing library": /shared security library unavailable/,
       "missing function": /shared security library defines no pipeline_security/,
-      "wrong Node": /Node 24 is required/,
+      "wrong Node": /Node >= 24 is required/,
+      "non-numeric Node": /Node >= 24 is required/,
     }[failure];
     if (reason) assert.match(result.stderr, reason);
     assert.deepEqual(f.lines(), failure === "failed security" ? ["security"] : []);
@@ -408,7 +425,7 @@ test("a missing node is refused by name, not by a silent command-not-found exit"
     cwd: f.linked, env: { ...f.env, PATH: nodeless }, input: f.update, encoding: "utf8", timeout: 60_000,
   });
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /Node 24 is required/);
+  assert.match(result.stderr, /Node >= 24 is required/);
   assert.deepEqual(f.lines(), []);
 });
 

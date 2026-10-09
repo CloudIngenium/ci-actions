@@ -12,8 +12,10 @@ if [ ! -f "$HOOKS_LIB" ] || [ ! -r "$HOOKS_LIB" ]; then
   printf 'ci-actions pre-push: shared security library unavailable: %s\n' "$HOOKS_LIB" >&2
   exit 1
 fi
-if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" != 24 ]; then
-  printf 'ci-actions pre-push: Node 24 is required\n' >&2
+# A floor, not a pin: hosts without a version manager run whatever Node is current.
+NODE_MAJOR="$(command -v node >/dev/null && node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+if ! [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || [ "$NODE_MAJOR" -lt 24 ]; then
+  printf 'ci-actions pre-push: Node >= 24 is required\n' >&2
   exit 1
 fi
 if ! command -v gitleaks >/dev/null; then

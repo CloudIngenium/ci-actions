@@ -11,7 +11,7 @@ as it is on GitHub-hosted images and CloudIngenium runner baselines.
 ## Local pre-push gate
 
 This package-free repository uses the versioned `.githooks/pre-push`, not the
-generic Node installer that requires `package.json`. The gate requires Node 24
+generic Node installer that requires `package.json`. The gate requires Node >= 24
 and gitleaks, resolves `infra-iac/hooks/lib/checks.sh` beside the main ci-actions
 clone through Git's common directory, and runs its `pipeline_security`, a real
 gitleaks history scan, and then the complete Node contract suite. Missing
@@ -70,7 +70,7 @@ publication clone; a linked worktree of the shared checkout is **not** isolated
 because it shares the common hooks directory. Use this sequence only in that
 publication clone or a worktree belonging to it:
 
-1. Verify the reviewed commit, clean worktree, Node 24, gitleaks and the reviewed
+1. Verify the reviewed commit, clean worktree, Node >= 24, gitleaks and the reviewed
    sibling infra-iac security library. Run the gate directly and require success.
 2. Inspect `git config --show-origin --get-all core.hooksPath` and the common
    hooks directory. If any hooks path is configured, or `hooks/pre-push` already
