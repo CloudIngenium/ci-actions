@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
-
 import {
   assertPlainObject,
   isDirectExecution,
@@ -16,6 +13,7 @@ import {
   stableStringify,
 } from "../lib/contract.mjs";
 import { writeOutputs } from "../lib/github-output.mjs";
+import { createTelemetryWriter } from "../lib/telemetry-fallback.mjs";
 
 const PHASE = /^[a-z][a-z0-9_]{0,63}$/;
 const POLICY_VERSION = /^[a-z0-9][a-z0-9._-]{2,63}$/;
@@ -231,13 +229,6 @@ function readArguments(argv) {
   return values;
 }
 
-async function atomicWrite(filePath, value) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, value, { encoding: "utf8", mode: 0o600 });
-  await rename(temporaryPath, filePath);
-}
-
 async function main() {
   const args = readArguments(process.argv.slice(2));
   const root = process.env.RUNNER_TEMP || process.env.GITHUB_WORKSPACE || process.cwd();
@@ -290,20 +281,25 @@ async function main() {
     args.get("envelope-path") || "ci-phase-envelope.json",
     "envelope-path",
   );
-  await atomicWrite(outputPath, serialized);
-  await atomicWrite(envelopePath, envelopeSerialized);
+  // Fail-open: callers such as Zap's write-zap-phase-telemetry.ps1 (via
+  // setup-ci-phase-emitter) write under RUNNER_TEMP/ci-telemetry, which a persistent
+  // runner can leave foreign-owned; redirect to a job-owned fallback dir instead.
+  const writer = createTelemetryWriter({ label: "ci_phase telemetry" });
+  const writtenOutputPath = await writer.atomicWrite(outputPath, serialized);
+  const writtenEnvelopePath = await writer.atomicWrite(envelopePath, envelopeSerialized);
 
   const appendPathInput = args.get("append-ndjson-path");
   let appendPath = "";
   if (appendPathInput) {
-    appendPath = resolveInside(root, appendPathInput, "append-ndjson-path");
-    await mkdir(path.dirname(appendPath), { recursive: true });
-    await appendFile(appendPath, `${JSON.stringify(payload)}\n`, { encoding: "utf8", mode: 0o600 });
+    appendPath = await writer.append(
+      resolveInside(root, appendPathInput, "append-ndjson-path"),
+      `${JSON.stringify(payload)}\n`,
+    );
   }
   await writeOutputs(args.get("github-output"), {
-    "payload-path": outputPath,
+    "payload-path": writtenOutputPath,
     "payload-sha256": envelope.provenance.canonical_payload_sha256,
-    "envelope-path": envelopePath,
+    "envelope-path": writtenEnvelopePath,
     "append-path": appendPath,
     "source-manifest-sha256": envelope.provenance.source_contract_manifest_sha256,
     "redacted-field-count": envelope.redacted_field_count,

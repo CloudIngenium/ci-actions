@@ -343,6 +343,15 @@ GitHub tokens, bearer tokens, private keys, embedded URL credentials, and SAS
 query values are redacted before disk or output. Send the resulting file with a
 separate trusted ingest step; this action performs no network request.
 
+Writes are fail-open against a foreign-owned telemetry directory. On a persistent
+self-hosted runner, `RUNNER_TEMP/ci-telemetry` can survive from another user's
+job; when a write there fails with `EACCES` or `EPERM` (and only then), the
+emitter retries once in a fresh job-owned `RUNNER_TEMP/ci-telemetry-<job>-XXXXXX`
+directory, keeps the file names, and prints one `::warning::` naming the original
+directory, its owner, and the fallback. Read `payload-path`, `envelope-path`, and
+`append-path` from the outputs rather than assuming the configured location.
+`emit-cache-observation` behaves the same way for its `payload-path`.
+
 Dynamic release scripts can reuse the same validator without constructing a
 second payload format. Run `setup-ci-phase-emitter` once after
 `resolve-job-context`; it exports the SHA-pinned Node entrypoint and contract

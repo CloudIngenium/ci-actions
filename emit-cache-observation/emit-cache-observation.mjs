@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
-
 import {
   isDirectExecution,
   normalizeIso,
@@ -13,6 +10,7 @@ import {
   stableStringify,
 } from "../lib/contract.mjs";
 import { writeOutputs } from "../lib/github-output.mjs";
+import { createTelemetryWriter } from "../lib/telemetry-fallback.mjs";
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const NAMESPACE = /^[a-z][a-z0-9._-]{0,63}$/;
@@ -152,14 +150,14 @@ async function main() {
   }, context);
   const root = process.env.RUNNER_TEMP || process.cwd();
   const outputPath = resolveInside(root, actionInput("output-path") || "ci-telemetry/cache-observation.json");
-  await mkdir(path.dirname(outputPath), { recursive: true });
   const serialized = stableStringify(payload);
   if (Buffer.byteLength(serialized, "utf8") > 16_384) throw new Error("cache observation exceeds 16384 bytes");
-  const temporaryPath = `${outputPath}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, serialized, { encoding: "utf8", mode: 0o600 });
-  await rename(temporaryPath, outputPath);
+  // Fail-open: a pre-existing, foreign-owned telemetry dir on a persistent runner
+  // redirects the write to a job-owned fallback dir instead of losing it.
+  const writer = createTelemetryWriter({ label: "cache observation" });
+  const writtenPath = await writer.atomicWrite(outputPath, serialized);
   await writeOutputs(process.env.GITHUB_OUTPUT, {
-    "payload-path": outputPath,
+    "payload-path": writtenPath,
     "payload-sha256": sha256(serialized),
     "cache-class": payload.cache_class,
     "telemetry-status": "emitted",
