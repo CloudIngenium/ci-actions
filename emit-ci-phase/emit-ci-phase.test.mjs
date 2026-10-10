@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
+import { tmpFixture } from "../lib/tmp-fixture.mjs";
 import { buildPhaseEnvelope, buildPhasePayload } from "./emit-ci-phase.mjs";
 
 const context = {
@@ -115,4 +120,101 @@ test("rejects non-canonical identity, versions, timestamps, units, and paths", (
     }),
     /64 hexadecimal/,
   );
+});
+
+// Fail-open writes: setup-ci-phase-emitter exports this emitter to callers (Zap's
+// write-zap-phase-telemetry.ps1) that write payload, envelope and NDJSON spool under
+// RUNNER_TEMP/ci-telemetry, which a persistent runner can leave foreign-owned.
+const emitter = fileURLToPath(new URL("./emit-ci-phase.mjs", import.meta.url));
+const skipModeBits = process.platform === "win32" || process.getuid?.() === 0
+  ? "mode bits are not enforced for root or on Windows"
+  : false;
+
+function runEmitter(runnerTemp) {
+  const githubOutput = path.join(runnerTemp, "github-output");
+  writeFileSync(githubOutput, "");
+  const result = spawnSync(process.execPath, [
+    emitter,
+    "--phase", "dotnet_restore",
+    "--sequence", "3",
+    "--status", "success",
+    "--started-at", base.startedAt,
+    "--completed-at", base.completedAt,
+    "--observed-at", base.observedAt,
+    "--duration-ms", base.durationMs,
+    "--job-id", base.jobId,
+    "--source-manifest-sha256", "a".repeat(64),
+    "--metadata-json", "{}",
+    "--output-path", "ci-telemetry/phase.json",
+    "--envelope-path", "ci-telemetry/phase-envelope.json",
+    "--append-ndjson-path", "ci-telemetry/phases.ndjson",
+    "--github-output", githubOutput,
+  ], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      RUNNER_TEMP: runnerTemp,
+      GITHUB_JOB: "release",
+      GITHUB_REPOSITORY: context.repository,
+      GITHUB_RUN_ID: context.runId,
+      GITHUB_RUN_ATTEMPT: context.runAttempt,
+    },
+  });
+  const outputs = Object.fromEntries(readFileSync(githubOutput, "utf8").trim().split("\n")
+    .filter(Boolean).map((line) => line.split(/=(.*)/s).slice(0, 2)));
+  return { ...result, outputs };
+}
+
+test("writes payload, envelope and spool to the configured dir when writable", () => {
+  const runnerTemp = tmpFixture("emit-ci-phase");
+  const result = runEmitter(runnerTemp);
+  assert.equal(result.status, 0, result.stderr);
+  const telemetry = path.join(runnerTemp, "ci-telemetry");
+  assert.equal(result.outputs["payload-path"], path.join(telemetry, "phase.json"));
+  assert.equal(result.outputs["envelope-path"], path.join(telemetry, "phase-envelope.json"));
+  assert.equal(result.outputs["append-path"], path.join(telemetry, "phases.ndjson"));
+  assert.doesNotMatch(result.stdout, /::warning::/);
+});
+
+test("falls back to one job-owned dir when the telemetry dir is unwritable", { skip: skipModeBits }, () => {
+  const runnerTemp = tmpFixture("emit-ci-phase");
+  const blocked = path.join(runnerTemp, "ci-telemetry");
+  mkdirSync(blocked);
+  chmodSync(blocked, 0o500);
+  try {
+    const result = runEmitter(runnerTemp);
+    assert.equal(result.status, 0, result.stderr);
+    const written = result.outputs["payload-path"];
+    const fallback = path.dirname(written);
+    assert.equal(path.dirname(fallback), runnerTemp);
+    assert.match(path.basename(fallback), /^ci-telemetry-release-/);
+    assert.equal(written, path.join(fallback, "phase.json"));
+    assert.equal(result.outputs["envelope-path"], path.join(fallback, "phase-envelope.json"));
+    assert.equal(result.outputs["append-path"], path.join(fallback, "phases.ndjson"));
+    const payload = JSON.parse(readFileSync(written, "utf8"));
+    assert.equal(payload.event_type, "ci_phase");
+    assert.equal(payload.phase, "dotnet_restore");
+    const envelope = JSON.parse(readFileSync(result.outputs["envelope-path"], "utf8"));
+    assert.deepEqual(envelope.canonical_event, payload);
+    assert.deepEqual(JSON.parse(readFileSync(result.outputs["append-path"], "utf8")), payload);
+    assert.deepEqual(readdirSync(blocked), []);
+    const warnings = result.stdout.split("\n").filter((line) => line.startsWith("::warning::"));
+    assert.equal(warnings.length, 1, result.stdout);
+    assert.ok(warnings[0].includes(blocked), warnings[0]);
+    assert.ok(warnings[0].includes(fallback), warnings[0]);
+    assert.match(warnings[0], /EACCES|EPERM/);
+    assert.match(warnings[0], /owner: /);
+  } finally {
+    chmodSync(blocked, 0o700);
+  }
+});
+
+test("non-permission write errors still fail without a fallback", () => {
+  const runnerTemp = tmpFixture("emit-ci-phase");
+  writeFileSync(path.join(runnerTemp, "ci-telemetry"), "not a directory");
+  const result = runEmitter(runnerTemp);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /::error::E(EXIST|NOTDIR)/);
+  assert.equal(result.outputs["payload-path"], undefined);
+  assert.deepEqual(readdirSync(runnerTemp).filter((name) => name.startsWith("ci-telemetry-")), []);
 });
