@@ -1,0 +1,25 @@
+# =============================================================================
+# Gitleaks Configuration
+# =============================================================================
+# Mirrors the fleet-wide pattern: useDefault rules + a minimal path allowlist
+# for files that conventionally contain placeholders / public identifiers
+# (Azure AD App/Tenant IDs, .env.example, gitleaksignore). Real secrets live
+# in Azure Key Vault / wrangler secrets and are loaded at runtime — never in
+# source. Extend `paths` below with any repo-specific false positives.
+# =============================================================================
+
+title = "Gitleaks Config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+  description = "Global allowlist — placeholders & public identifiers"
+  paths = [
+    # Standard ignores
+    '''(^|/)\.gitleaksignore$''',
+    '''(^|/)\.env\.example$''',
+    '''(^|/)node_modules/''',
+    '''(^|/)dist/''',
+  ]
+  regexTarget = "line"
