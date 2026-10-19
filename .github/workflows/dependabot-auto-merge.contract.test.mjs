@@ -22,13 +22,30 @@ test("Dependabot auto-merge uses a lightweight bounded runner contract", () => {
   assert.match(workflow, /timeout-minutes: 5/);
 });
 
+// A pin is checked as an invariant, never as a literal digest (plan
+// 2026-10-03-master-fleet-currency-majors B59, JC D37): a literal SHA here is a
+// second copy of the workflow's pin, so every correct Dependabot bump broke it,
+// while a tag pin breaks the invariant just as surely. The workflow file is the
+// single source of the pin; which SHA is approved is the pin audit's call.
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
 test("Dependabot metadata is SHA-pinned and majors remain unarmed", () => {
-  const actionRefs = [...workflow.matchAll(/^\s+(?:-\s+)?uses: ([^\s#]+).*$/gm)].map(
-    ([, ref]) => ref,
+  const actionRefs = [...workflow.matchAll(/^\s+(?:-\s+)?uses:\s*["']?([^\s#"']+)["']?.*$/gm)].map(
+    ([, ref]) => {
+      const at = ref.lastIndexOf("@");
+      return at < 0 ? { action: ref, sha: "" } : { action: ref.slice(0, at), sha: ref.slice(at + 1) };
+    },
   );
-  assert.deepEqual(actionRefs, [
-    "dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98",
-  ]);
+  // The privileged workflow runs exactly one action: Dependabot's own metadata reader.
+  assert.deepEqual(
+    actionRefs.map(({ action }) => action),
+    ["dependabot/fetch-metadata"],
+  );
+  // Pinned to a full 40-hex commit SHA: a tag, a branch or a short SHA fails.
+  for (const { action, sha } of actionRefs) {
+    assert.match(sha, FULL_SHA, `${action}@${sha} must be pinned to a full 40-hex commit SHA`);
+  }
+  assert.equal(new Set(actionRefs.map(({ sha }) => sha)).size, 1, "every use of the action shares one SHA");
   assert.equal(
     [...workflow.matchAll(/steps\.metadata\.outputs\.update-type != 'version-update:semver-major'/g)].length,
     2,
