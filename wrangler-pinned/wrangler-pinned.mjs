@@ -14,8 +14,10 @@
  *     npm user/global config point into the install directory, the registry is
  *     npmjs, and no scoped registry, auth token, NODE_OPTIONS or caller
  *     npm_config_* / PNPM_CONFIG_* variable is passed through;
- *   - the install is `--frozen-lockfile --ignore-scripts --ignore-pnpmfile`
- *     from a fresh directory outside GITHUB_WORKSPACE.
+ *   - the install is `--frozen-lockfile --ignore-scripts --ignore-pnpmfile
+ *     --ignore-workspace` from a fresh directory outside GITHUB_WORKSPACE (without
+ *     the last two, a pnpm-workspace.yaml in RUNNER_TEMP could name a pnpmfile
+ *     that runs during the install).
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -40,7 +42,14 @@ export const PINNED_FILES = Object.freeze({
 });
 // Variables copied from the caller's environment. Everything else is dropped.
 const PASSTHROUGH = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"];
-const WINDOWS_PASSTHROUGH = ["SystemRoot", "SYSTEMROOT", "windir", "ComSpec", "PATHEXT", "SystemDrive", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"];
+// libuv adds HOMEDRIVE, HOMEPATH, LOGONSERVER, SYSTEMDRIVE, SYSTEMROOT, TEMP,
+// USERDOMAIN, USERNAME, USERPROFILE and WINDIR from the parent to any explicit
+// Windows env that lacks them, so each is either set into the isolation dir
+// below or passed through here on purpose.
+const WINDOWS_PASSTHROUGH = [
+  "SystemRoot", "SYSTEMROOT", "windir", "ComSpec", "PATHEXT", "SystemDrive", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+  "USERNAME", "USERDOMAIN", "LOGONSERVER",
+];
 
 const ACTION_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -163,6 +172,8 @@ export function isolatedEnv({ target, baseEnv, platform = process.platform, exec
   if (platform === "win32") {
     Object.assign(env, {
       USERPROFILE: iso.home,
+      HOMEDRIVE: pathApi.parse(iso.home).root.replace(/\\$/, ""),
+      HOMEPATH: iso.home.slice(pathApi.parse(iso.home).root.replace(/\\$/, "").length),
       APPDATA: pathApi.join(iso.home, "AppData", "Roaming"),
       LOCALAPPDATA: pathApi.join(iso.home, "AppData", "Local"),
       TEMP: iso.tmp,
@@ -198,7 +209,11 @@ export function provisionPnpm({ iso, env, spawn = spawnSync, execPath = process.
   mkdirSync(iso.pnpmCli, { recursive: true });
   runNode({
     spawn, execPath, script: npmCli, cwd: iso.pnpmCli, env,
-    args: ["pack", `pnpm@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY],
+    // --prefix (and --no-workspaces): otherwise npm walks up to a parent
+    // package.json whose workspaces name the install dir and loads the .npmrc
+    // beside it as project config. With --prefix npm never walks.
+    args: ["pack", `pnpm@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY,
+      "--prefix", iso.pnpmCli, "--no-workspaces"],
   });
   const tarball = path.join(iso.pnpmCli, `pnpm-${PNPM_VERSION}.tgz`);
   if (!existsSync(tarball)) fail(`npm pack did not produce ${tarball}`);
@@ -251,8 +266,8 @@ export async function run({
   spawn = spawnSync,
   pnpmProvider = provisionPnpm,
 } = {}) {
-  const major = Number(process.versions.node.split(".")[0]);
-  if (!(major >= 22)) fail(`pnpm ${PNPM_VERSION} needs Node >= 22.13; this is ${process.version}`);
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  if (!(major > 22 || (major === 22 && minor >= 13))) fail(`pnpm ${PNPM_VERSION} needs Node >= 22.13; this is ${process.version}`);
   const target = resolveTarget({ runnerTemp: env.RUNNER_TEMP, workspace: env.GITHUB_WORKSPACE, dir: env.INPUT_DIR });
   rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });

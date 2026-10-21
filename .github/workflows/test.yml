@@ -227,11 +227,13 @@ jobs:
       - name: Plant hostile caller install configuration
         shell: bash
         run: |
+          # The marker path is baked in: the isolated install env has no RUNNER_TEMP.
+          marker="$(node -p 'JSON.stringify(require("node:path").join(process.env.RUNNER_TEMP, "PWNED"))')"
           for dir in "$GITHUB_WORKSPACE" "$RUNNER_TEMP"; do
             printf 'registry=http://127.0.0.1:9/\n@cloudflare:registry=http://127.0.0.1:9/\n' > "$dir/.npmrc"
             printf "packages: ['.']\nregistries:\n  default: http://127.0.0.1:9/\noverrides:\n  wrangler: 4.123.0\npnpmfile: hostile.cjs\n" > "$dir/pnpm-workspace.yaml"
-            printf '{"name":"hostile","private":true,"packageManager":"pnpm@9.0.0","dependencies":{"wrangler":"4.123.0"}}\n' > "$dir/package.json"
-            printf 'require("node:fs").writeFileSync(process.env.RUNNER_TEMP + "/PWNED", "x");\nmodule.exports = { hooks: {} };\n' > "$dir/.pnpmfile.cjs"
+            printf '{"name":"hostile","private":true,"packageManager":"pnpm@9.0.0","workspaces":["d1-wrangler"],"dependencies":{"wrangler":"4.123.0"}}\n' > "$dir/package.json"
+            printf 'require("node:fs").writeFileSync(%s, "x");\nmodule.exports = { hooks: {} };\n' "$marker" > "$dir/.pnpmfile.cjs"
             cp "$dir/.pnpmfile.cjs" "$dir/hostile.cjs"
           done
 

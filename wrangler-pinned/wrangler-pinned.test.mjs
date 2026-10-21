@@ -24,8 +24,14 @@ const ALLOWED_ENV = new Set([
   "PNPM_HOME", "PNPM_CONFIG_UPDATE_NOTIFIER", "PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS",
   "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
   "SystemRoot", "SYSTEMROOT", "windir", "ComSpec", "PATHEXT", "SystemDrive", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+  // libuv adds these from the parent to any Windows child env that lacks them.
+  "HOMEDRIVE", "HOMEPATH", "USERNAME", "USERDOMAIN", "LOGONSERVER",
   "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 ]);
+// Windows env names are case-insensitive, and libuv injects the upper-case form.
+const ALLOWED_ENV_FOLDED = new Set([...ALLOWED_ENV].map((name) => name.toUpperCase()));
+const leakedNames = (env) => Object.keys(env).filter((name) =>
+  !(process.platform === "win32" ? ALLOWED_ENV_FOLDED.has(name.toUpperCase()) : ALLOWED_ENV.has(name)));
 
 function runnerLayout() {
   const root = real(tmpFixture("wrangler-pinned"));
@@ -43,7 +49,9 @@ function plantHostileFiles(dir, marker) {
   writeFileSync(path.join(dir, "pnpm-workspace.yaml"),
     "packages: ['.']\nregistries:\n  default: http://127.0.0.1:9/\noverrides:\n  wrangler: 4.123.0\npnpmfile: hostile.cjs\n");
   writeFileSync(path.join(dir, "package.json"),
-    JSON.stringify({ name: "hostile", private: true, packageManager: "pnpm@9.0.0", dependencies: { wrangler: "4.123.0" } }));
+    JSON.stringify({
+      name: "hostile", private: true, packageManager: "pnpm@9.0.0", workspaces: [DEFAULT_DIR], dependencies: { wrangler: "4.123.0" },
+    }));
   const hook = `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "pnpmfile ran");\nmodule.exports = { hooks: {} };\n`;
   writeFileSync(path.join(dir, ".pnpmfile.cjs"), hook);
   writeFileSync(path.join(dir, "hostile.cjs"), hook);
@@ -143,7 +151,10 @@ test("a directory inside the workspace is refused once resolved, through links a
   assert.throws(() => resolveTarget({ runnerTemp: temp2, workspace: path.join(tempLink, "ws"), dir: "ws/x" }), /overlaps GITHUB_WORKSPACE/);
 });
 
-test("hostile caller .npmrc, pnpm-workspace.yaml, package.json, pnpmfile and env never reach the install", async () => {
+// pnpm is a stub here, so the planted pnpmfile and pnpm-workspace.yaml are never
+// parsed: this test proves the argv, cwd, staged files and env pnpm receives. The
+// real-install smoke in test.yml (action-contracts) proves pnpm ignores the files.
+test("hostile caller files and env never reach the install's argv, cwd, files or env", async () => {
   const { root, temp, workspace } = runnerLayout();
   const marker = path.join(root, "PWNED");
   plantHostileFiles(workspace, marker);
@@ -195,14 +206,14 @@ test("hostile caller .npmrc, pnpm-workspace.yaml, package.json, pnpmfile and env
   assert.equal(seen.userconfig, "");
   assert.equal(seen.globalconfig, "");
 
-  const leaked = Object.keys(seen.env).filter((name) => !ALLOWED_ENV.has(name));
+  const leaked = leakedNames(seen.env);
   assert.deepEqual(leaked, [], "only allowlisted variables reach pnpm");
   assert.equal(seen.env.npm_config_registry, REGISTRY);
   for (const name of ["HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "npm_config_userconfig", "npm_config_globalconfig", "npm_config_cache"]) {
     assert.ok(real(seen.env[name]).startsWith(real(target) + path.sep), `${name} is inside the install directory`);
   }
   assert.doesNotMatch(JSON.stringify(seen.env), /fixture-not-a-secret|127\.0\.0\.1:9|hostile-store/);
-  assert.deepEqual(Object.keys(provided.env).filter((name) => !ALLOWED_ENV.has(name)), [], "npm sees the same isolation");
+  assert.deepEqual(leakedNames(provided.env), [], "npm sees the same isolation");
 
   const bin = path.join(target, "node_modules", "wrangler", "bin", "wrangler.js");
   assert.deepEqual(outputs, { "wrangler-bin": bin, "wrangler-dir": target, "wrangler-version": WRANGLER_VERSION });
@@ -274,7 +285,8 @@ test("pnpm is fetched by exact version from npmjs and its tarball checked, never
   assert.equal(calls.length, 1, "nothing is installed from an unverified tarball");
   assert.equal(calls[0].command, process.execPath);
   assert.match(calls[0].args[0], /npm-cli\.js$/);
-  assert.deepEqual(calls[0].args.slice(1), ["pack", `pnpm@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY]);
+  assert.deepEqual(calls[0].args.slice(1), ["pack", `pnpm@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY,
+    "--prefix", iso.pnpmCli, "--no-workspaces"]);
   assert.equal(calls[0].options.env, env);
 });
 
@@ -284,12 +296,17 @@ test("the Windows environment keeps profile, temp and config inside the install 
     target,
     platform: "win32",
     execPath: "C:\\hostedtoolcache\\node\\x64\\node.exe",
-    baseEnv: { SystemRoot: "C:\\Windows", ComSpec: "C:\\Windows\\system32\\cmd.exe", USERPROFILE: "C:\\Users\\runner", NODE_OPTIONS: "--x", HTTPS_PROXY: "http://proxy:3128" },
+    baseEnv: { SystemRoot: "C:\\Windows", ComSpec: "C:\\Windows\\system32\\cmd.exe", USERPROFILE: "C:\\Users\\runner", HOMEPATH: "\\Users\\runner", USERNAME: "runner", NODE_OPTIONS: "--x", HTTPS_PROXY: "http://proxy:3128" },
   });
+  assert.equal(env.USERNAME, "runner");
   assert.equal(env.PATH, "C:\\hostedtoolcache\\node\\x64;C:\\Windows\\System32;C:\\Windows");
   assert.equal(env.SystemRoot, "C:\\Windows");
   assert.equal(env.HTTPS_PROXY, "http://proxy:3128");
   assert.equal(env.NODE_OPTIONS, undefined);
+  // Set here so libuv never copies the runner's home in.
+  assert.equal(env.HOMEDRIVE, "D:");
+  assert.equal(env.HOMEPATH, "\\a\\_temp\\d1-wrangler\\.isolation\\home");
+  assert.equal(`${env.HOMEDRIVE}${env.HOMEPATH}`, env.USERPROFILE);
   for (const name of ["USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "HOME"]) {
     assert.ok(path.win32.relative(target, env[name]).split("\\")[0] === ".isolation", name);
   }
