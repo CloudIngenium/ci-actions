@@ -223,6 +223,16 @@ jobs:
           if ($null -ne $manifest.contract_version) { throw "Release manifest must not claim KH contract v4" }
           if ($manifest.file_count -ne 1) { throw "Unexpected release file count" }
 
+      # setup-ci-phase-emitter put the runner's bundled node first on PATH, and on
+      # Windows that node has no npm beside it. Callers of wrangler-pinned run
+      # setup-node first; so does this smoke. Before the hostile files: setup-node
+      # reads the workspace package.json.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          check-latest: false
+          package-manager-cache: false
+
       # Last in the job: the hostile files below would steer any later pnpm step.
       - name: Plant hostile caller install configuration
         shell: bash

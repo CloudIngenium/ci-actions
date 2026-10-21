@@ -193,7 +193,10 @@ export function findNpmCli(execPath = process.execPath, platform = process.platf
     ? [pathApi.join(nodeDir, "node_modules", "npm", "bin", "npm-cli.js")]
     : [pathApi.join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")];
   const found = candidates.find((candidate) => existsSync(candidate));
-  if (!found) fail(`npm is not installed beside ${execPath}`);
+  if (!found) {
+    fail(`npm is not installed beside ${execPath}; run actions/setup-node right before this action `
+      + "(the runner's bundled node has no npm on Windows)");
+  }
   return found;
 }
 

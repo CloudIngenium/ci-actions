@@ -541,7 +541,10 @@ and is deleted and recreated on every run.
   earlier step wrote is caller-influenced. The action runs the npm that ships
   beside the running `node`, packs `pnpm@11.13.0` from npmjs, checks the
   tarball against a SHA-512 constant, and installs it inside the install
-  directory. Node >= 22.13 is required.
+  directory. Node >= 22.13 is required, and the `node` on `PATH` must be a
+  full distribution with npm beside it, as `actions/setup-node` installs. The
+  runner's own bundled node is not one on Windows, and `setup-ci-phase-emitter`
+  puts that node first on `PATH`, so run `actions/setup-node` again after it.
 - npm and pnpm run with an allowlisted environment only: `HOME`, `XDG_*`,
   `TMPDIR` and the npm user and global config point into the install directory
   (the configs are empty files), the registry is npmjs, and no scoped registry,
