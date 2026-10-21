@@ -8,6 +8,11 @@ All new actions use only the Node.js standard library. The Linux paths use
 `bash`; Windows paths use `pwsh`. A Node.js CLI must be available on the runner,
 as it is on GitHub-hosted images and CloudIngenium runner baselines.
 
+`wrangler-pinned` is the one action that carries a `package.json` and a
+`pnpm-lock.yaml`. They are data: the action installs them under `RUNNER_TEMP` at
+run time, and nothing is ever installed into this repository, so the repository
+itself stays package-free.
+
 ## Local pre-push gate
 
 This package-free repository uses the versioned `.githooks/pre-push`, not the
@@ -502,6 +507,65 @@ reported as `not_requested` rather than guessed. The cache key is derived from
 the lockfile plus exact Node and pnpm versions. Workflows using another cache
 mechanism should emit that mechanism's measured hit separately with
 `emit-cache-observation`.
+
+## Pinned wrangler
+
+A workflow that runs the caller's own `node_modules/.bin/wrangler` with a
+Cloudflare token in scope hands that token to whatever binary the caller's
+repository resolves. `wrangler-pinned` installs a wrangler the action owns:
+
+```yaml
+- id: wrangler
+  uses: CloudIngenium/ci-actions/wrangler-pinned@<full-commit-sha>
+- name: Apply
+  shell: bash
+  env:
+    WRANGLER_BIN: ${{ steps.wrangler.outputs['wrangler-bin'] }}
+  run: node "$WRANGLER_BIN" --version
+```
+
+Outputs: `wrangler-bin` (absolute path of `node_modules/wrangler/bin/wrangler.js`),
+`wrangler-dir` (the install directory) and `wrangler-version` (asserted equal to
+the pin). The only input, `dir`, defaults to `RUNNER_TEMP/d1-wrangler`; it must
+resolve strictly under `RUNNER_TEMP`, never inside or around `GITHUB_WORKSPACE`,
+and is deleted and recreated on every run.
+
+- `package.json` pins `wrangler` exactly (`4.124.0`), a deliberate exception to
+  the caret default: this is a binary that receives a token, so every version
+  change is reviewed. `pnpm-lock.yaml` was generated with pnpm 11.13.0 against
+  `https://registry.npmjs.org/`. Both are checked against SHA-256 constants in
+  `wrangler-pinned.mjs` before and after they are staged, and
+  `.gitattributes` keeps them byte-exact on Windows checkouts.
+- pnpm is not taken from `PATH` and not from the caller's `packageManager`:
+  `setup-node-pnpm` resolves it from the caller, and any `PATH` entry an
+  earlier step wrote is caller-influenced. The action runs the npm that ships
+  beside the running `node`, packs `pnpm@11.13.0` from npmjs, checks the
+  tarball against a SHA-512 constant, and installs it inside the install
+  directory. Node >= 22.13 is required, and the `node` on `PATH` must be a
+  full distribution with npm beside it, as `actions/setup-node` installs. The
+  runner's own bundled node is not one on Windows, and `setup-ci-phase-emitter`
+  puts that node first on `PATH`, so run `actions/setup-node` again after it.
+- npm and pnpm run with an allowlisted environment only: `HOME`, `XDG_*`,
+  `TMPDIR` and the npm user and global config point into the install directory
+  (the configs are empty files), the registry is npmjs, and no scoped registry,
+  auth token, `NODE_OPTIONS`, `npm_config_*` or `PNPM_CONFIG_*` from the job
+  passes through. Proxy variables do.
+- The install is `pnpm install --frozen-lockfile --ignore-scripts
+  --ignore-pnpmfile --ignore-workspace`. pnpm looks for `pnpm-workspace.yaml`
+  and `.pnpmfile.cjs` in parent directories, and `RUNNER_TEMP` is a parent:
+  without the last two flags a planted `RUNNER_TEMP/pnpm-workspace.yaml` naming
+  a pnpmfile ran caller code during the install (measured on pnpm 11.13.0).
+- Run it before any caller-controlled code executes in the job. A step that
+  already ran caller code could have replaced `node` itself.
+- wrangler loads `.env` and `.env.local` from its working directory into its own
+  environment (variables the process already has win). A caller's `.env` can
+  therefore set `CLOUDFLARE_API_BASE_URL` or a proxy. Pass `--env-file` with an
+  empty file, or set those variables explicitly, when the token is in scope.
+
+There is deliberately no Dependabot npm entry for this directory
+(`.github/dependabot.yml` is generated and covers GitHub Actions only). A
+wrangler bump is two reviewed PRs: regenerate the lockfile and constants here,
+then move the caller's SHA pin to that commit.
 
 ## Emit exact cache evidence
 

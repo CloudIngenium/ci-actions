@@ -1,0 +1,35 @@
+name: Pinned wrangler
+description: >-
+  Install the wrangler release this action pins, from its own package.json and
+  pnpm lockfile, under RUNNER_TEMP and isolated from the caller's files,
+  configuration and environment.
+
+inputs:
+  dir:
+    description: >-
+      Install directory, relative to RUNNER_TEMP or an absolute path strictly
+      under it. Refused when it overlaps GITHUB_WORKSPACE. It is deleted and
+      recreated on every run.
+    required: false
+    default: d1-wrangler
+
+outputs:
+  wrangler-bin:
+    description: Absolute path of node_modules/wrangler/bin/wrangler.js. Run it with node.
+    value: ${{ steps.install.outputs['wrangler-bin'] }}
+  wrangler-dir:
+    description: Absolute path of the install directory.
+    value: ${{ steps.install.outputs['wrangler-dir'] }}
+  wrangler-version:
+    description: The installed wrangler version, asserted equal to the pin.
+    value: ${{ steps.install.outputs['wrangler-version'] }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned wrangler in isolation
+      id: install
+      shell: bash
+      env:
+        INPUT_DIR: ${{ inputs.dir }}
+      run: node "$GITHUB_ACTION_PATH/wrangler-pinned.mjs"
