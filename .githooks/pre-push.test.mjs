@@ -64,8 +64,12 @@ test("LF and CRLF parsing preserves exact contract selection and rejects semanti
   }
 });
 
-test("only the executable native hook requires LF checkout", () => {
-  assert.equal(canonicalEol(readFileSync(join(root, ".gitattributes"), "utf8")).trim(), "/.githooks/pre-push text eol=lf");
+test("only the executable native hook requires LF checkout; hash-pinned install data stays byte-exact", () => {
+  assert.equal(canonicalEol(readFileSync(join(root, ".gitattributes"), "utf8")).trim(), [
+    "/.githooks/pre-push text eol=lf",
+    "/wrangler-pinned/package.json -text",
+    "/wrangler-pinned/pnpm-lock.yaml -text",
+  ].join("\n"));
   assert.doesNotMatch(hook, /\r/);
 });
 

@@ -52,6 +52,7 @@ jobs:
           release-manifest/release-manifest.test.mjs
           package-source-v2/index.test.mjs
           download-ranged-artifact/download-ranged-artifact.test.mjs
+          wrangler-pinned/wrangler-pinned.test.mjs
           .github/workflows/dependabot-auto-merge.contract.test.mjs
           .github/workflows/socket-security.contract.test.mjs
           .githooks/pre-push.test.mjs
@@ -221,6 +222,44 @@ jobs:
           if ($manifest.schema_version -ne 1) { throw "Unexpected release manifest schema" }
           if ($null -ne $manifest.contract_version) { throw "Release manifest must not claim KH contract v4" }
           if ($manifest.file_count -ne 1) { throw "Unexpected release file count" }
+
+      # Last in the job: the hostile files below would steer any later pnpm step.
+      - name: Plant hostile caller install configuration
+        shell: bash
+        run: |
+          for dir in "$GITHUB_WORKSPACE" "$RUNNER_TEMP"; do
+            printf 'registry=http://127.0.0.1:9/\n@cloudflare:registry=http://127.0.0.1:9/\n' > "$dir/.npmrc"
+            printf "packages: ['.']\nregistries:\n  default: http://127.0.0.1:9/\noverrides:\n  wrangler: 4.123.0\npnpmfile: hostile.cjs\n" > "$dir/pnpm-workspace.yaml"
+            printf '{"name":"hostile","private":true,"packageManager":"pnpm@9.0.0","dependencies":{"wrangler":"4.123.0"}}\n' > "$dir/package.json"
+            printf 'require("node:fs").writeFileSync(process.env.RUNNER_TEMP + "/PWNED", "x");\nmodule.exports = { hooks: {} };\n' > "$dir/.pnpmfile.cjs"
+            cp "$dir/.pnpmfile.cjs" "$dir/hostile.cjs"
+          done
+
+      - id: wrangler
+        uses: ./wrangler-pinned
+        env:
+          NPM_CONFIG_REGISTRY: http://127.0.0.1:9/
+          PNPM_CONFIG_REGISTRY: http://127.0.0.1:9/
+          npm_config_userconfig: ${{ github.workspace }}/.npmrc
+
+      - name: Verify pinned wrangler install
+        shell: bash
+        env:
+          WRANGLER_BIN: ${{ steps.wrangler.outputs['wrangler-bin'] }}
+          WRANGLER_DIR: ${{ steps.wrangler.outputs['wrangler-dir'] }}
+          WRANGLER_VERSION: ${{ steps.wrangler.outputs['wrangler-version'] }}
+        run: |
+          set -euo pipefail
+          test "$WRANGLER_VERSION" = "4.124.0"
+          test -f "$WRANGLER_BIN"
+          test ! -e "$RUNNER_TEMP/PWNED"
+          test ! -e "$GITHUB_WORKSPACE/node_modules"
+          dir="$(cd "$WRANGLER_DIR" && pwd -P)"
+          temp="$(cd "$RUNNER_TEMP" && pwd -P)"
+          case "$dir" in "$temp"/*) ;; *) echo "::error::install is not under RUNNER_TEMP: $dir"; exit 1 ;; esac
+          test "$(cd "$WRANGLER_DIR" && node -p 'require("./node_modules/wrangler/package.json").version')" = "4.124.0"
+          # Offline: --version makes no Cloudflare call.
+          test "$(WRANGLER_SEND_METRICS=false node "$WRANGLER_BIN" --version | tail -n 1)" = "4.124.0"
 
   setup-node-pnpm:
     name: setup-node-pnpm
