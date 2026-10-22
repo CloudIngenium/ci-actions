@@ -527,7 +527,8 @@ repository resolves. `wrangler-pinned` installs a wrangler the action owns:
 Outputs: `wrangler-bin` (absolute path of `node_modules/wrangler/bin/wrangler.js`),
 `wrangler-dir` (the install directory) and `wrangler-version` (asserted equal to
 the pin). The only input, `dir`, defaults to `RUNNER_TEMP/d1-wrangler`; it must
-resolve strictly under `RUNNER_TEMP`, never inside or around `GITHUB_WORKSPACE`,
+resolve strictly under `RUNNER_TEMP`, never inside or around `GITHUB_WORKSPACE`
+(no path segment may end in `.` or a space, which Windows would trim),
 and is deleted and recreated on every run.
 
 - `package.json` pins `wrangler` exactly (`4.124.0`), a deliberate exception to

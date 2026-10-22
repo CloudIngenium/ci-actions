@@ -71,9 +71,15 @@ function resolveReal(p, pathApi = path) {
   return missing.length ? pathApi.join(base, ...missing) : base;
 }
 
+/**
+ * True when `child` is strictly below `parent`. Only a `..` path SEGMENT means
+ * outside: a child entry named `..x` is inside. A relative path that comes back
+ * absolute (Windows, another drive) is outside.
+ */
 export function isInside(child, parent, pathApi = path) {
   const rel = pathApi.relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !pathApi.isAbsolute(rel);
+  if (rel === "" || pathApi.isAbsolute(rel)) return false;
+  return rel !== ".." && !rel.startsWith(`..${pathApi.sep}`);
 }
 
 /**
@@ -88,6 +94,11 @@ export function resolveTarget({ runnerTemp, workspace, dir }) {
   if (!workspace) fail("GITHUB_WORKSPACE is not set; cannot prove the install is outside it");
   const input = dir || DEFAULT_DIR;
   if (/[\0\r\n]/.test(input)) fail("dir contains a control character");
+  // Win32 strips a trailing dot or space from a segment, so `.. ` or `...` can
+  // mean `..` to the OS while path.win32 keeps it literal. Refuse them everywhere.
+  if (input.split(/[\\/]/).some((s) => s !== "." && s !== ".." && /[. ]$/.test(s))) {
+    fail("dir has a path segment ending in '.' or a space");
+  }
   const temp = realpathSync.native(runnerTemp);
   const target = resolveReal(path.isAbsolute(input) ? input : path.join(temp, input));
   const ws = resolveReal(workspace);
