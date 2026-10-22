@@ -123,6 +123,11 @@ test("the install directory defaults under RUNNER_TEMP and refuses the workspace
   assert.throws(() => resolveTarget({ runnerTemp: temp, workspace, dir: "../escape" }), /strictly under RUNNER_TEMP/);
   assert.throws(() => resolveTarget({ runnerTemp: temp, workspace, dir: path.join(workspace, "wr") }), /strictly under RUNNER_TEMP/);
   assert.throws(() => resolveTarget({ runnerTemp: temp, workspace, dir: "a\nb" }), /control character/);
+  // Segments Win32 would trim to `..` (or to another name) are refused on every platform.
+  for (const dir of [".. ", "...", ".. .", "x/.. ", "x\\...", "wr.", "wr "]) {
+    assert.throws(() => resolveTarget({ runnerTemp: temp, workspace, dir }), /ending in '.' or a space/, JSON.stringify(dir));
+  }
+  assert.equal(resolveTarget({ runnerTemp: temp, workspace, dir: "./wr" }), path.join(temp, "wr"));
 });
 
 test("a directory inside the workspace is refused once resolved, through links and nesting", () => {
