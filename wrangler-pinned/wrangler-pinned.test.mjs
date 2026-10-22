@@ -8,7 +8,7 @@ import test from "node:test";
 import { tmpFixture } from "../lib/tmp-fixture.mjs";
 import {
   DEFAULT_DIR, LOCKFILE_SHA256, PACKAGE_JSON_SHA256, PINNED_FILES, PNPM_TARBALL_SHA512, PNPM_VERSION, REGISTRY,
-  WRANGLER_VERSION, isolatedEnv, isolationPaths, pnpmInstallArgs, provisionPnpm, resolveTarget, run, sha256File,
+  WRANGLER_VERSION, isInside, isolatedEnv, isolationPaths, pnpmInstallArgs, provisionPnpm, resolveTarget, run, sha256File,
 } from "./wrangler-pinned.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -149,6 +149,43 @@ test("a directory inside the workspace is refused once resolved, through links a
   const inner = path.join(temp2, "ws");
   mkdirSync(inner);
   assert.throws(() => resolveTarget({ runnerTemp: temp2, workspace: path.join(tempLink, "ws"), dir: "ws/x" }), /overlaps GITHUB_WORKSPACE/);
+});
+
+test("isInside treats only a `..` segment as outside, on posix and win32", () => {
+  const cases = [
+    // [api, child, parent, inside]
+    [path.posix, "/t/..x", "/t", true],
+    [path.posix, "/t/..x/y", "/t", true],
+    [path.posix, "/t/...", "/t", true],
+    [path.posix, "/t/a/b", "/t", true],
+    [path.posix, "/t", "/t", false],
+    [path.posix, "/", "/t", false],
+    [path.posix, "/x", "/t", false],
+    [path.posix, "/t/../x", "/t", false],
+    [path.posix, "/tx", "/t", false],
+    [path.win32, "C:\\t\\..x", "C:\\t", true],
+    [path.win32, "C:\\t\\a\\b", "C:\\t", true],
+    [path.win32, "C:\\t", "C:\\t", false],
+    [path.win32, "C:\\", "C:\\t", false],
+    [path.win32, "C:\\x", "C:\\t", false],
+    [path.win32, "D:\\t\\a", "C:\\t", false],
+    [path.win32, "D:\\t", "C:\\t", false],
+  ];
+  for (const [api, child, parent, inside] of cases) {
+    assert.equal(isInside(child, parent, api), inside, `${api === path.win32 ? "win32" : "posix"} ${child} in ${parent}`);
+  }
+});
+
+test("a directory entry named `..x` is a real child, both under RUNNER_TEMP and around the workspace", () => {
+  const { temp, workspace } = runnerLayout();
+  assert.equal(resolveTarget({ runnerTemp: temp, workspace, dir: "..x" }), path.join(temp, "..x"));
+  assert.equal(resolveTarget({ runnerTemp: temp, workspace, dir: "..x/wr" }), path.join(temp, "..x", "wr"));
+  // A target that would contain a workspace named `..x` (and delete it with the install).
+  const ws = path.join(temp, "outer", "..x");
+  mkdirSync(ws, { recursive: true });
+  assert.throws(() => resolveTarget({ runnerTemp: temp, workspace: ws, dir: "outer" }), /overlaps GITHUB_WORKSPACE/);
+  // ..and a target inside it.
+  assert.throws(() => resolveTarget({ runnerTemp: temp, workspace: ws, dir: "outer/..x/wr" }), /overlaps GITHUB_WORKSPACE/);
 });
 
 // pnpm is a stub here, so the planted pnpmfile and pnpm-workspace.yaml are never

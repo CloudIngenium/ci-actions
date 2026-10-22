@@ -71,9 +71,15 @@ function resolveReal(p, pathApi = path) {
   return missing.length ? pathApi.join(base, ...missing) : base;
 }
 
+/**
+ * True when `child` is strictly below `parent`. Only a `..` path SEGMENT means
+ * outside: a child entry named `..x` is inside. A relative path that comes back
+ * absolute (Windows, another drive) is outside.
+ */
 export function isInside(child, parent, pathApi = path) {
   const rel = pathApi.relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !pathApi.isAbsolute(rel);
+  if (rel === "" || pathApi.isAbsolute(rel)) return false;
+  return rel !== ".." && !rel.startsWith(`..${pathApi.sep}`);
 }
 
 /**
