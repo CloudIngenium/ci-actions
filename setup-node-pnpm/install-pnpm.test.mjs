@@ -16,6 +16,7 @@ const bash = process.platform === "win32"
 //   ok    installs a bin/pnpm that prints the version
 //   segv  installs a bin/pnpm that exits 139, as pnpm 12's stub does without its platform binary
 //   fail  exits 1 without installing, as npm does when the registry refuses the connection
+//   broken installs a bin/pnpm that exits 1
 const STUB_NPM = `#!/usr/bin/env bash
 set -euo pipefail
 prefix="$4"
@@ -28,11 +29,11 @@ echo "$outcome $leftover" >> "$STUB_LOG"
 [ "$outcome" = fail ] && exit 1
 mkdir -p "$prefix/bin"
 touch "$prefix/marker"
-if [ "$outcome" = ok ]; then
-  printf '#!/usr/bin/env bash\\necho 12.15.0\\n' > "$prefix/bin/pnpm"
-else
-  printf '#!/usr/bin/env bash\\nexit 139\\n' > "$prefix/bin/pnpm"
-fi
+case "$outcome" in
+  ok) printf '#!/usr/bin/env bash\\necho 12.15.0\\n' > "$prefix/bin/pnpm" ;;
+  segv) printf '#!/usr/bin/env bash\\nexit 139\\n' > "$prefix/bin/pnpm" ;;
+  *) printf '#!/usr/bin/env bash\\nexit 1\\n' > "$prefix/bin/pnpm" ;;
+esac
 chmod +x "$prefix/bin/pnpm"
 `;
 
@@ -42,12 +43,15 @@ function run(plan, env = {}) {
   const log = path.join(root, "npm.log");
   writeFileSync(npm, STUB_NPM);
   chmodSync(npm, 0o755);
+  // Windows folds env names, so a second casing of the registry key would shadow the one a test
+  // sets: drop every casing and let the test set one.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !/^npm_config_registry$/i.test(name)),
+  );
   const result = spawnSync(bash, [script, path.join(root, "prefix")], {
     encoding: "utf8",
     env: {
-      ...process.env,
-      npm_config_registry: "",
-      NPM_CONFIG_REGISTRY: "",
+      ...inherited,
       PNPM_VERSION: "12.15.0",
       PNPM_INSTALL_NPM: npm,
       PNPM_INSTALL_RETRY_DELAY: "0",
@@ -86,6 +90,19 @@ test("a refused registry fails after the last attempt and names the registry", (
   assert.equal((stdout.match(/::warning::/g) ?? []).length, 2);
   assert.match(stdout, /::error::pnpm 12\.15\.0 did not install after 3 attempts \(npm install exited 1\)\. Registry: http:\/\/cache\.example:4873\//);
   assert.deepEqual(calls, ["fail clean", "fail clean", "fail clean"]);
+});
+
+test("a pnpm that fails without a segfault is retried without the binary hint", () => {
+  const { status, stdout, calls } = run("broken,ok");
+  assert.equal(status, 0);
+  assert.match(stdout, /::warning::pnpm 12\.15\.0 install attempt 1 of 3 failed \(pnpm --version exited 1\); retrying/);
+  assert.deepEqual(calls, ["broken clean", "ok clean"]);
+});
+
+test("without a registry setting the error says npm default", () => {
+  const { status, stdout } = run("fail", { PNPM_INSTALL_ATTEMPTS: "1" });
+  assert.equal(status, 1);
+  assert.match(stdout, /Registry: npm default$/m);
 });
 
 test("PNPM_INSTALL_ATTEMPTS bounds the loop", () => {
