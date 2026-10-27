@@ -41,6 +41,7 @@ jobs:
           detect-ci-scope/detect-ci-scope.test.mjs
           setup-node-pnpm/resolve-pnpm-version.test.mjs
           setup-node-pnpm/cache-evidence.test.mjs
+          setup-node-pnpm/install-pnpm.test.mjs
           emit-cache-observation/emit-cache-observation.test.mjs
           runner-baseline/runner-baseline.test.mjs
           resolve-job-context/resolve-job-context.test.mjs
