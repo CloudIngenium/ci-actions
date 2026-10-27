@@ -104,9 +104,9 @@ runs:
         set -euo pipefail
 
         pnpm_root="${RUNNER_TEMP}/pnpm-cli-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_JOB}"
-        rm -rf "$pnpm_root"
-        mkdir -p "$pnpm_root"
-        npm install --global --prefix "$pnpm_root" "pnpm@${PNPM_VERSION}"
+        # Installs, runs `pnpm --version` and retries a broken install: pnpm 12's binary is an
+        # optional dependency npm drops silently when the registry stalls (install-pnpm.sh says why).
+        bash "$GITHUB_ACTION_PATH/install-pnpm.sh" "$pnpm_root"
         # pnpm 11 reads PNPM_CONFIG_* only and ignores NPM_CONFIG_STORE_DIR, so
         # without PNPM_CONFIG_STORE_DIR the "isolated" store fell through to the
         # runner user's global pnpm config. On a self-hosted runner that is
@@ -120,7 +120,6 @@ runs:
           echo "NPM_CONFIG_STORE_DIR=$pnpm_root/store"
         } >> "$GITHUB_ENV"
         echo "$pnpm_root/bin" >> "$GITHUB_PATH"
-        "$pnpm_root/bin/pnpm" --version
 
     - name: Classify isolated pnpm store
       id: cache_evidence
