@@ -118,6 +118,11 @@ done
 # shellcheck source=/dev/null
 source "$HOOKS_LIB"
 declare -F pipeline_security >/dev/null || { printf 'ci-actions pre-push: shared security library defines no pipeline_security\n' >&2; exit 1; }
+declare -F echo_pass >/dev/null || { printf 'ci-actions pre-push: shared security library defines no echo_pass\n' >&2; exit 1; }
+# The fleet execution probe certifies a custom hook only when it says its scope is full.
+# It is: .githooks/pre-push.test.mjs, in the selection below, fails unless the selection
+# is every *.test.mjs in the tree.
+printf ':: scope: full\n'
 pipeline_security
 for range in "${RANGES[@]}"; do
   gitleaks git --redact --no-banner --timeout 60 --log-opts="--full-history --diff-merges=first-parent $range" .
@@ -156,3 +161,5 @@ CONTRACT_TESTS=(
 )
 node .githooks/run-contract-tests.mjs "${CONTRACT_TESTS[@]}"
 [ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ] || { printf 'ci-actions pre-push: HEAD moved while the gate ran\n' >&2; exit 1; }
+# The shared summary line: green only when no security gate skipped; REDUCED names the ones that did.
+echo_pass
