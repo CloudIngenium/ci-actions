@@ -28,7 +28,10 @@ try {
     }
   });
   results.on("test:summary", (event) => { summary = event; });
-  await pipeline(results, tap, process.stdout);
+  // Never end stdout. When Node spawns the hook, stdout is a socketpair this process
+  // shares with the hook's bash: ending it shuts the socket for both, and the hook's
+  // next write (its summary line) dies of SIGPIPE.
+  await pipeline(results, tap, process.stdout, { end: false });
   const counts = summary?.counts;
   if (!summary?.success || !counts || counts.tests < 1 || counts.passed !== counts.tests
     || counts.failed || counts.cancelled || counts.skipped || counts.todo

@@ -79,6 +79,9 @@ function put(path, content, executable = false) {
   if (executable) chmodSync(path, 0o755);
 }
 
+// The shared library's summary line; the real one prints REDUCED when a gate skipped.
+const passStub = "echo_pass() { printf ':: All pre-push checks passed.\\n'; }\n";
+
 function fixture(t) {
   const temporary = realpathSync(mkdtempSync(join(tmpdir(), "ci-pre-push-")));
   t.after(() => rmSync(temporary, { recursive: true, force: true }));
@@ -128,7 +131,7 @@ test(${JSON.stringify(`real contract ${file}`)}, () => {
 });
 `);
   }
-  put(security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n");
+  put(security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n" + passStub);
   put(join(bin, "gitleaks"), "#!/usr/bin/env bash\nprintf 'history:%s\\n' \"$*\" >> \"$CONTRACT_LOG\"\n", true);
   git("add", ".");
   git("commit", "-m", "Fixture contract gate");
@@ -161,6 +164,9 @@ for (const topology of ["main", "linked"]) {
     assert.equal(f.lines()[1], `history:git --redact --no-banner --timeout 60 --log-opts=--full-history --diff-merges=first-parent ${f.head} .`);
     assert.deepEqual(f.lines().slice(2).sort(), selection.map((file) => `test:${file}`).sort());
     assert.match(result.stdout, new RegExp(`# tests ${selection.length}\\b`));
+    const out = result.stdout.trim().split("\n");
+    assert.ok(out.includes(":: scope: full"), result.stdout);
+    assert.equal(out.at(-1), ":: All pre-push checks passed.");
     f.unchanged();
   });
 }
@@ -180,12 +186,18 @@ exec '${realNode}' "$@"
   f.unchanged();
 });
 
-for (const failure of ["missing library", "missing function", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
+for (const failure of ["missing library", "missing function", "missing pass reporter", "untracked selection", "unselected tracked test", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
   test(`hook fails closed before contracts: ${failure}`, (t) => {
     const f = fixture(t);
     if (failure === "missing library") rmSync(f.security);
     if (failure === "missing function") put(f.security, "other_function() { return 0; }\n");
-    if (failure === "failed security") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; return 37; }\n");
+    if (failure === "missing pass reporter") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n");
+    if (failure === "untracked selection") assert.equal(f.execute("git", ["rm", "-q", "--cached", selection[0]], f.linked).status, 0);
+    if (failure === "unselected tracked test") {
+      put(join(f.linked, "extra/unselected.test.mjs"), 'import {test} from "node:test"; test("unselected", () => {});\n');
+      assert.equal(f.execute("git", ["add", "extra/unselected.test.mjs"], f.linked).status, 0);
+    }
+    if (failure === "failed security") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; return 37; }\n" + passStub);
     if (failure === "invalid shell") put(f.security, "pipeline_security() {\n");
     if (failure === "wrong Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf '22\\n'\n", true);
     if (failure === "non-numeric Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf 'v26\\n'\n", true);
@@ -195,10 +207,14 @@ for (const failure of ["missing library", "missing function", "failed security",
     const reason = {
       "missing library": /shared security library unavailable/,
       "missing function": /shared security library defines no pipeline_security/,
+      "missing pass reporter": /shared security library defines no echo_pass/,
+      "untracked selection": /contract selection is not every tracked \*\.test\.mjs/,
+      "unselected tracked test": /contract selection is not every tracked \*\.test\.mjs/,
       "wrong Node": /Node >= 24 is required/,
       "non-numeric Node": /Node >= 24 is required/,
     }[failure];
     if (reason) assert.match(result.stderr, reason);
+    assert.doesNotMatch(result.stdout, /pre-push checks passed/i);
     assert.deepEqual(f.lines(), failure === "failed security" ? ["security"] : []);
     f.unchanged();
   });
@@ -219,6 +235,7 @@ for (const mode of ["assertion", "missing", "empty", "skipped", "todo", "early e
     }[mode]);
     const result = f.invoke(f.linked);
     assert.notEqual(result.status, 0, `${mode}: ${result.stdout}`);
+    assert.doesNotMatch(result.stdout, /pre-push checks passed/i);
     assert.equal(f.lines()[0], "security");
     assert.match(result.stderr, /ci-actions pre-push:/);
     f.unchanged();
