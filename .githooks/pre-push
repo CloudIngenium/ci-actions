@@ -119,18 +119,6 @@ done
 source "$HOOKS_LIB"
 declare -F pipeline_security >/dev/null || { printf 'ci-actions pre-push: shared security library defines no pipeline_security\n' >&2; exit 1; }
 declare -F echo_pass >/dev/null || { printf 'ci-actions pre-push: shared security library defines no echo_pass\n' >&2; exit 1; }
-# The fleet execution probe certifies a custom hook only when it says its scope is full.
-# It is: .githooks/pre-push.test.mjs, in the selection below, fails unless the selection
-# is every *.test.mjs in the tree.
-printf ':: scope: full\n'
-pipeline_security
-for range in "${RANGES[@]}"; do
-  gitleaks git --redact --no-banner --timeout 60 --log-opts="--full-history --diff-merges=first-parent $range" .
-done
-[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ] || { printf 'ci-actions pre-push: HEAD moved while the gate ran\n' >&2; exit 1; }
-bash -n .githooks/pre-push
-node --check .githooks/run-contract-tests.mjs
-
 # CI's Test action contracts step is authoritative. pre-push.test.mjs enforces
 # exact parity and complete discovery, including the hidden workflow contracts.
 CONTRACT_TESTS=(
@@ -159,7 +147,19 @@ CONTRACT_TESTS=(
   .github/workflows/socket-security.contract.test.mjs
   .githooks/pre-push.test.mjs
 )
+# The fleet execution probe certifies a custom hook only when it says its scope is full,
+# so the claim is checked here, not left to a test the selection itself could drop.
+[ "$(git ls-files -- '*.test.mjs' | LC_ALL=C sort)" = "$(printf '%s\n' "${CONTRACT_TESTS[@]}" | LC_ALL=C sort)" ] \
+  || { printf 'ci-actions pre-push: the contract selection is not every tracked *.test.mjs\n' >&2; exit 1; }
+printf ':: scope: full\n'
+pipeline_security
+for range in "${RANGES[@]}"; do
+  gitleaks git --redact --no-banner --timeout 60 --log-opts="--full-history --diff-merges=first-parent $range" .
+done
+[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ] || { printf 'ci-actions pre-push: HEAD moved while the gate ran\n' >&2; exit 1; }
+bash -n .githooks/pre-push
+node --check .githooks/run-contract-tests.mjs
 node .githooks/run-contract-tests.mjs "${CONTRACT_TESTS[@]}"
 [ "$(git rev-parse --verify 'HEAD^{commit}')" = "$HEAD_SHA" ] || { printf 'ci-actions pre-push: HEAD moved while the gate ran\n' >&2; exit 1; }
-# The shared summary line: green only when no security gate skipped; REDUCED names the ones that did.
+# The shared summary line: green only when no gate skipped or went unrecorded; REDUCED or UNCONFIRMED says which.
 echo_pass

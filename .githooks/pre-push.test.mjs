@@ -186,12 +186,17 @@ exec '${realNode}' "$@"
   f.unchanged();
 });
 
-for (const failure of ["missing library", "missing function", "missing pass reporter", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
+for (const failure of ["missing library", "missing function", "missing pass reporter", "untracked selection", "unselected tracked test", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
   test(`hook fails closed before contracts: ${failure}`, (t) => {
     const f = fixture(t);
     if (failure === "missing library") rmSync(f.security);
     if (failure === "missing function") put(f.security, "other_function() { return 0; }\n");
     if (failure === "missing pass reporter") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n");
+    if (failure === "untracked selection") assert.equal(f.execute("git", ["rm", "-q", "--cached", selection[0]], f.linked).status, 0);
+    if (failure === "unselected tracked test") {
+      put(join(f.linked, "extra/unselected.test.mjs"), 'import {test} from "node:test"; test("unselected", () => {});\n');
+      assert.equal(f.execute("git", ["add", "extra/unselected.test.mjs"], f.linked).status, 0);
+    }
     if (failure === "failed security") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; return 37; }\n" + passStub);
     if (failure === "invalid shell") put(f.security, "pipeline_security() {\n");
     if (failure === "wrong Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf '22\\n'\n", true);
@@ -203,6 +208,8 @@ for (const failure of ["missing library", "missing function", "missing pass repo
       "missing library": /shared security library unavailable/,
       "missing function": /shared security library defines no pipeline_security/,
       "missing pass reporter": /shared security library defines no echo_pass/,
+      "untracked selection": /contract selection is not every tracked \*\.test\.mjs/,
+      "unselected tracked test": /contract selection is not every tracked \*\.test\.mjs/,
       "wrong Node": /Node >= 24 is required/,
       "non-numeric Node": /Node >= 24 is required/,
     }[failure];
