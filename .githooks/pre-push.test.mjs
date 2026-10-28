@@ -186,30 +186,53 @@ exec '${realNode}' "$@"
   f.unchanged();
 });
 
-for (const failure of ["missing library", "missing function", "missing pass reporter", "untracked selection", "unselected tracked test", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
+const unselectedTest = 'import {test} from "node:test"; test("unselected", () => {});\n';
+
+for (const failure of ["missing library", "missing function", "missing pass reporter", "selection missing from pushed commit", "unselected tracked test", "unselected test unstaged after commit", "unselected test Git quotes", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
   test(`hook fails closed before contracts: ${failure}`, (t) => {
     const f = fixture(t);
+    let input;
+    // The hook reads the pushed commit, so a selection change is made by committing it and pushing that commit.
+    const commitAndPush = (message) => {
+      assert.equal(f.execute("git", ["commit", "-q", "-m", message], f.linked).status, 0);
+      const head = f.execute("git", ["rev-parse", "HEAD"], f.linked).stdout.trim();
+      input = `${head} ${head} refs/heads/publication ${"0".repeat(40)}\n`;
+    };
     if (failure === "missing library") rmSync(f.security);
     if (failure === "missing function") put(f.security, "other_function() { return 0; }\n");
     if (failure === "missing pass reporter") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n");
-    if (failure === "untracked selection") assert.equal(f.execute("git", ["rm", "-q", "--cached", selection[0]], f.linked).status, 0);
-    if (failure === "unselected tracked test") {
-      put(join(f.linked, "extra/unselected.test.mjs"), 'import {test} from "node:test"; test("unselected", () => {});\n');
+    if (failure === "selection missing from pushed commit") {
+      assert.equal(f.execute("git", ["rm", "-q", "--cached", selection[0]], f.linked).status, 0);
+      commitAndPush("Untrack a selected contract");
+    }
+    if (failure === "unselected tracked test" || failure === "unselected test unstaged after commit") {
+      put(join(f.linked, "extra/unselected.test.mjs"), unselectedTest);
       assert.equal(f.execute("git", ["add", "extra/unselected.test.mjs"], f.linked).status, 0);
+      commitAndPush("Add an unselected contract");
+    }
+    // The index matches the selection again, but the pushed commit still carries the unselected test.
+    if (failure === "unselected test unstaged after commit") assert.equal(f.execute("git", ["rm", "-q", "--cached", "extra/unselected.test.mjs"], f.linked).status, 0);
+    // Git lists a non-ASCII name in quotes, so the line ends in .test.mjs"; it must still count.
+    if (failure === "unselected test Git quotes") {
+      put(join(f.linked, "extra/é.test.mjs"), unselectedTest);
+      assert.equal(f.execute("git", ["add", "extra/é.test.mjs"], f.linked).status, 0);
+      commitAndPush("Add an unselected contract with a quoted name");
     }
     if (failure === "failed security") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; return 37; }\n" + passStub);
     if (failure === "invalid shell") put(f.security, "pipeline_security() {\n");
     if (failure === "wrong Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf '22\\n'\n", true);
     if (failure === "non-numeric Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf 'v26\\n'\n", true);
-    const result = f.invoke(f.linked);
+    const result = f.invoke(f.linked, input);
     assert.notEqual(result.status, 0, result.stdout);
     if (failure === "failed security") assert.equal(result.status, 37);
     const reason = {
       "missing library": /shared security library unavailable/,
       "missing function": /shared security library defines no pipeline_security/,
       "missing pass reporter": /shared security library defines no echo_pass/,
-      "untracked selection": /contract selection is not every tracked \*\.test\.mjs/,
-      "unselected tracked test": /contract selection is not every tracked \*\.test\.mjs/,
+      "selection missing from pushed commit": /contract selection is not every \*\.test\.mjs in the pushed commit/,
+      "unselected tracked test": /contract selection is not every \*\.test\.mjs in the pushed commit/,
+      "unselected test unstaged after commit": /contract selection is not every \*\.test\.mjs in the pushed commit/,
+      "unselected test Git quotes": /contract selection is not every \*\.test\.mjs in the pushed commit/,
       "wrong Node": /Node >= 24 is required/,
       "non-numeric Node": /Node >= 24 is required/,
     }[failure];
@@ -219,6 +242,19 @@ for (const failure of ["missing library", "missing function", "missing pass repo
     f.unchanged();
   });
 }
+
+test("a staged-only selection change neither refuses nor counts: the check reads the pushed commit", (t) => {
+  const f = fixture(t);
+  // Unstage a selected contract (the file stays) and stage an unselected one; neither is in the pushed commit.
+  assert.equal(f.execute("git", ["rm", "-q", "--cached", selection[0]], f.linked).status, 0);
+  put(join(f.linked, "extra/staged.test.mjs"), unselectedTest);
+  assert.equal(f.execute("git", ["add", "extra/staged.test.mjs"], f.linked).status, 0);
+  const result = f.invoke(f.linked);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(f.lines().slice(2).sort(), selection.map((file) => `test:${file}`).sort());
+  assert.equal(result.stdout.trim().split("\n").at(-1), ":: All pre-push checks passed.");
+  f.unchanged();
+});
 
 for (const mode of ["assertion", "missing", "empty", "skipped", "todo", "early exit", "syntax"]) {
   test(`hidden workflow contract ${mode} cannot produce a successful hook`, (t) => {

@@ -20,7 +20,8 @@ generic Node installer that requires `package.json`. The gate requires Node >= 2
 and gitleaks, resolves `infra-iac/hooks/lib/checks.sh` beside the main ci-actions
 clone through Git's common directory, and runs its `pipeline_security`, a real
 gitleaks history scan, and then the complete Node contract suite. It announces
-`:: scope: full` and ends with the library's `echo_pass` summary line, which is
+`:: scope: full` once its selection matches every `*.test.mjs` in the pushed
+commit, and ends with the library's `echo_pass` summary line, which is
 REDUCED when a security gate skipped: the fleet execution probe certifies the
 hook only from that line. Missing
 security, missing tests, failures,
