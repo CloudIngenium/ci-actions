@@ -149,8 +149,10 @@ CONTRACT_TESTS=(
 )
 # The fleet execution probe certifies a custom hook only when it says its scope is full,
 # so the claim is checked here, not left to a test the selection itself could drop.
-[ "$(git ls-files -- '*.test.mjs' | LC_ALL=C sort)" = "$(printf '%s\n' "${CONTRACT_TESTS[@]}" | LC_ALL=C sort)" ] \
-  || { printf 'ci-actions pre-push: the contract selection is not every tracked *.test.mjs\n' >&2; exit 1; }
+# It reads the pushed commit, not the index: a staged-only change can neither hide a
+# committed test nor refuse a push whose commit is complete.
+[ "$(git ls-tree -r --full-tree --name-only "$HEAD_SHA" | sed -n '/\.test\.mjs$/p' | LC_ALL=C sort)" = "$(printf '%s\n' "${CONTRACT_TESTS[@]}" | LC_ALL=C sort)" ] \
+  || { printf 'ci-actions pre-push: the contract selection is not every *.test.mjs in the pushed commit\n' >&2; exit 1; }
 printf ':: scope: full\n'
 pipeline_security
 for range in "${RANGES[@]}"; do
