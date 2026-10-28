@@ -188,7 +188,7 @@ exec '${realNode}' "$@"
 
 const unselectedTest = 'import {test} from "node:test"; test("unselected", () => {});\n';
 
-for (const failure of ["missing library", "missing function", "missing pass reporter", "untracked selection", "unselected tracked test", "unselected test unstaged after commit", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
+for (const failure of ["missing library", "missing function", "missing pass reporter", "selection missing from pushed commit", "unselected tracked test", "unselected test unstaged after commit", "unselected test Git quotes", "failed security", "invalid shell", "wrong Node", "non-numeric Node"]) {
   test(`hook fails closed before contracts: ${failure}`, (t) => {
     const f = fixture(t);
     let input;
@@ -201,7 +201,7 @@ for (const failure of ["missing library", "missing function", "missing pass repo
     if (failure === "missing library") rmSync(f.security);
     if (failure === "missing function") put(f.security, "other_function() { return 0; }\n");
     if (failure === "missing pass reporter") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; }\n");
-    if (failure === "untracked selection") {
+    if (failure === "selection missing from pushed commit") {
       assert.equal(f.execute("git", ["rm", "-q", "--cached", selection[0]], f.linked).status, 0);
       commitAndPush("Untrack a selected contract");
     }
@@ -212,6 +212,12 @@ for (const failure of ["missing library", "missing function", "missing pass repo
     }
     // The index matches the selection again, but the pushed commit still carries the unselected test.
     if (failure === "unselected test unstaged after commit") assert.equal(f.execute("git", ["rm", "-q", "--cached", "extra/unselected.test.mjs"], f.linked).status, 0);
+    // Git lists a non-ASCII name in quotes, so the line ends in .test.mjs"; it must still count.
+    if (failure === "unselected test Git quotes") {
+      put(join(f.linked, "extra/é.test.mjs"), unselectedTest);
+      assert.equal(f.execute("git", ["add", "extra/é.test.mjs"], f.linked).status, 0);
+      commitAndPush("Add an unselected contract with a quoted name");
+    }
     if (failure === "failed security") put(f.security, "pipeline_security() { printf 'security\\n' >> \"$CONTRACT_LOG\"; return 37; }\n" + passStub);
     if (failure === "invalid shell") put(f.security, "pipeline_security() {\n");
     if (failure === "wrong Node") put(join(f.bin, "node"), "#!/usr/bin/env bash\nprintf '22\\n'\n", true);
@@ -223,9 +229,10 @@ for (const failure of ["missing library", "missing function", "missing pass repo
       "missing library": /shared security library unavailable/,
       "missing function": /shared security library defines no pipeline_security/,
       "missing pass reporter": /shared security library defines no echo_pass/,
-      "untracked selection": /contract selection is not every \*\.test\.mjs in the pushed commit/,
+      "selection missing from pushed commit": /contract selection is not every \*\.test\.mjs in the pushed commit/,
       "unselected tracked test": /contract selection is not every \*\.test\.mjs in the pushed commit/,
       "unselected test unstaged after commit": /contract selection is not every \*\.test\.mjs in the pushed commit/,
+      "unselected test Git quotes": /contract selection is not every \*\.test\.mjs in the pushed commit/,
       "wrong Node": /Node >= 24 is required/,
       "non-numeric Node": /Node >= 24 is required/,
     }[failure];
