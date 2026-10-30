@@ -263,16 +263,16 @@ jobs:
           WRANGLER_VERSION: ${{ steps.wrangler.outputs['wrangler-version'] }}
         run: |
           set -euo pipefail
-          test "$WRANGLER_VERSION" = "4.124.0"
+          test "$WRANGLER_VERSION" = "4.154.0"
           test -f "$WRANGLER_BIN"
           test ! -e "$RUNNER_TEMP/PWNED"
           test ! -e "$GITHUB_WORKSPACE/node_modules"
           dir="$(cd "$WRANGLER_DIR" && pwd -P)"
           temp="$(cd "$RUNNER_TEMP" && pwd -P)"
           case "$dir" in "$temp"/*) ;; *) echo "::error::install is not under RUNNER_TEMP: $dir"; exit 1 ;; esac
-          test "$(cd "$WRANGLER_DIR" && node -p 'require("./node_modules/wrangler/package.json").version')" = "4.124.0"
+          test "$(cd "$WRANGLER_DIR" && node -p 'require("./node_modules/wrangler/package.json").version')" = "4.154.0"
           # Offline: --version makes no Cloudflare call.
-          test "$(WRANGLER_SEND_METRICS=false node "$WRANGLER_BIN" --version | tail -n 1)" = "4.124.0"
+          test "$(WRANGLER_SEND_METRICS=false node "$WRANGLER_BIN" --version | tail -n 1)" = "4.154.0"
 
   setup-node-pnpm:
     name: setup-node-pnpm

@@ -271,7 +271,7 @@ test("an installed wrangler other than the pinned release is rejected", async ()
   const { root, temp, workspace } = runnerLayout();
   const env = { ...process.env, RUNNER_TEMP: temp, GITHUB_WORKSPACE: workspace, GITHUB_OUTPUT: "" };
   const stub = stubPnpm(root, { version: "4.123.0", record: path.join(root, "record.json") });
-  await assert.rejects(run({ env, pnpmProvider: () => stub }), /installed wrangler@4\.123\.0, expected wrangler@4\.124\.0/);
+  await assert.rejects(run({ env, pnpmProvider: () => stub }), /installed wrangler@4\.123\.0, expected wrangler@4\.154\.0/);
 
   const empty = path.join(root, "empty-stub.mjs");
   writeFileSync(empty, "");
