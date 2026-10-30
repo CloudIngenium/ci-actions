@@ -93,7 +93,7 @@ runs:
         version="$(node "$GITHUB_ACTION_PATH/resolve-pnpm-version.mjs" \
           --explicit "$EXPLICIT_PNPM_VERSION" \
           --manifest "$manifest" \
-          --fallback "11.13.0")"
+          --fallback "11.28.8")"
         echo "version=$version" >> "$GITHUB_OUTPUT"
 
     - name: Install exact pnpm in an isolated prefix

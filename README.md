@@ -499,7 +499,9 @@ The action installs Node first, resolves the exact stable pnpm version from the
 root `package.json#packageManager`, then installs it with npm into a job-scoped
 directory under `RUNNER_TEMP`. `pnpm-version` remains available as an explicit
 override, and `package-manager-file` selects a nested installation boundary.
-When no declaration exists, the action falls back to pnpm 11.13.0. It never uses
+When no declaration exists, the action falls back to pnpm 11.28.8, the pnpm 11
+floor in Knowledge-Hub `config/platform-catalog.json` (`packageManagerFloors`);
+npm marks 11.13.0, the old fallback, as a broken release. It never uses
 Corepack or `pnpm/action-setup`, and it does not share a pnpm CLI or store between
 jobs.
 
