@@ -27,12 +27,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { writeOutputs } from "../lib/github-output.mjs";
 
-export const WRANGLER_VERSION = "4.124.0";
+export const WRANGLER_VERSION = "4.154.0";
 export const PNPM_VERSION = "11.13.0";
 export const REGISTRY = "https://registry.npmjs.org/";
 export const DEFAULT_DIR = "d1-wrangler";
-export const PACKAGE_JSON_SHA256 = "7e61a1fb2264f84cbf9a413b55367e58a444a6e64cbef781d766cf35849e7676";
-export const LOCKFILE_SHA256 = "cc42d862a77c23ae04bcf7929d91df5fa31a35e6246bfcddcb0330cd96a81d97";
+export const PACKAGE_JSON_SHA256 = "97f556c58c92613c0e1b62a409a87f8ada836637fc0fb520944b4b5e2929e5e7";
+export const LOCKFILE_SHA256 = "62227de125233232c72332ad20684667be2a799b3f77dadcd49ea7b4c02e8972";
 // dist.integrity of https://registry.npmjs.org/pnpm/-/pnpm-11.13.0.tgz
 export const PNPM_TARBALL_SHA512 =
   "sha512-iNlHJNjy5sGGdEpVhMblnsrIaex7oV6ctM1ijo3HBmggskgdjuO1HqjaMjpzeAaKpYxVajcg0yt8IKBR0Ig2Og==";

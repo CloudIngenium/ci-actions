@@ -537,7 +537,7 @@ resolve strictly under `RUNNER_TEMP`, never inside or around `GITHUB_WORKSPACE`
 (no path segment may end in `.` or a space, which Windows would trim),
 and is deleted and recreated on every run.
 
-- `package.json` pins `wrangler` exactly (`4.124.0`), a deliberate exception to
+- `package.json` pins `wrangler` exactly (`4.154.0`), a deliberate exception to
   the caret default: this is a binary that receives a token, so every version
   change is reviewed. `pnpm-lock.yaml` was generated with pnpm 11.13.0 against
   `https://registry.npmjs.org/`. Both are checked against SHA-256 constants in
