@@ -102,8 +102,8 @@ jobs:
             v26.*) ;;
             *) echo "::error::Node 26 (the default) was not installed"; exit 1 ;;
           esac
-          test "$(pnpm --version)" = "11.13.0"
-          test "${{ steps.node-pnpm.outputs['pnpm-version'] }}" = "11.13.0"
+          test "$(pnpm --version)" = "11.28.8"
+          test "${{ steps.node-pnpm.outputs['pnpm-version'] }}" = "11.28.8"
           test "${{ steps.node-pnpm.outputs['cache-class'] }}" = "cold"
           test "${{ steps.node-pnpm.outputs['telemetry-status'] }}" = "emitted"
           test -s "${{ steps.node-pnpm.outputs['cache-observation-path'] }}"

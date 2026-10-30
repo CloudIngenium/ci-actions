@@ -31,10 +31,10 @@ test("packageManager is the default source", async () => {
 
 test("fallback is used when the manifest is absent or has no packageManager", async () => {
   const missing = path.join(os.tmpdir(), `missing-${randomUUID()}.json`);
-  assert.equal(await resolvePnpmVersion({ manifest: missing, fallback: "11.13.0" }), "11.13.0");
+  assert.equal(await resolvePnpmVersion({ manifest: missing, fallback: "11.28.8" }), "11.28.8");
 
   const manifest = await manifestWith(undefined);
-  assert.equal(await resolvePnpmVersion({ manifest, fallback: "11.13.0" }), "11.13.0");
+  assert.equal(await resolvePnpmVersion({ manifest, fallback: "11.28.8" }), "11.28.8");
 });
 
 test("invalid explicit and packageManager values fail closed", async () => {
