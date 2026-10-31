@@ -132,10 +132,10 @@ jobs:
       - id: baseline
         uses: ./runner-baseline
         with:
-          # Linux ran ./setup-node-pnpm above with its default (Node 26); Windows keeps
-          # the job's actions/setup-node 24.
+          # Linux ran ./setup-node-pnpm above with its default (Node 26); Windows ran
+          # the job's actions/setup-node 26.
           requirements-json: >-
-            {"node_major":${{ runner.os == 'Linux' && 26 || 24 }},"git_minimum":"2.40.0"}
+            {"node_major":26,"git_minimum":"2.40.0"}
 
       - id: baseline-drift
         uses: ./runner-baseline
