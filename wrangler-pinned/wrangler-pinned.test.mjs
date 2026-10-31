@@ -7,14 +7,17 @@ import test from "node:test";
 
 import { tmpFixture } from "../lib/tmp-fixture.mjs";
 import {
-  DEFAULT_DIR, LOCKFILE_SHA256, PACKAGE_JSON_SHA256, PINNED_FILES, PNPM_TARBALL_SHA512, PNPM_VERSION, REGISTRY,
-  WRANGLER_VERSION, isInside, isolatedEnv, isolationPaths, pnpmInstallArgs, provisionPnpm, resolveTarget, run, sha256File,
+  DEFAULT_DIR, LOCKFILE_SHA256, PACKAGE_JSON_SHA256, PINNED_FILES, PNPM_BINARIES, PNPM_VERSION, REGISTRY,
+  WRANGLER_VERSION, isInside, isolatedEnv, isolationPaths, pnpmInstallArgs, pnpmTarget, provisionPnpm, resolveTarget, run,
+  sha256File,
 } from "./wrangler-pinned.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const real = (p) => realpathSync.native(p);
 const dirLink = (target, link) => symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+// A pnpmProvider result that runs a stub script where the native pnpm would run.
+const viaNode = (script) => ({ command: process.execPath, args: [script] });
 
 // Only these names may reach npm or pnpm. Anything else is caller state leaking in.
 const ALLOWED_ENV = new Set([
@@ -45,7 +48,7 @@ function runnerLayout() {
 /** Hostile copies of every file a caller could use to steer an install. */
 function plantHostileFiles(dir, marker) {
   writeFileSync(path.join(dir, ".npmrc"),
-    "registry=http://127.0.0.1:9/\n@cloudflare:registry=http://127.0.0.1:9/\n//127.0.0.1:9/:_authToken=fixture-not-a-secret\n");
+    "registry=http://127.0.0.1:9/\n@cloudflare:registry=http://127.0.0.1:9/\n@pnpm:registry=http://127.0.0.1:9/\n//127.0.0.1:9/:_authToken=fixture-not-a-secret\n");
   writeFileSync(path.join(dir, "pnpm-workspace.yaml"),
     "packages: ['.']\nregistries:\n  default: http://127.0.0.1:9/\noverrides:\n  wrangler: 4.123.0\npnpmfile: hostile.cjs\n");
   writeFileSync(path.join(dir, "package.json"),
@@ -96,9 +99,14 @@ test("hash constants match the committed package.json and lockfile, which pin wr
   assert.doesNotMatch(lock, /tarball:|https?:\/\/|npm\.pkg\.github\.com/, "every package resolves from the default registry by integrity");
   assert.doesNotMatch(lock, /@cloudingenium\//);
   assert.doesNotMatch(lock, /^pnpmfileChecksum:|^patchedDependencies:|^overrides:/m);
-  assert.match(PNPM_TARBALL_SHA512, /^sha512-[A-Za-z0-9+/]{86}==$/);
+  for (const [target, { integrity, bin }] of Object.entries(PNPM_BINARIES)) {
+    assert.match(integrity, /^sha512-[A-Za-z0-9+/]{86}==$/, target);
+    assert.equal(bin, target.startsWith("win32-") ? "pnpm.exe" : "pnpm", target);
+  }
+  assert.equal(new Set(Object.values(PNPM_BINARIES).map(({ integrity }) => integrity)).size, Object.keys(PNPM_BINARIES).length);
+  for (const target of ["linux-x64", "win32-x64"]) assert.ok(Object.hasOwn(PNPM_BINARIES, target), `${target}: a runner platform`);
   assert.equal(REGISTRY, "https://registry.npmjs.org/");
-  assert.equal(PNPM_VERSION, "11.13.0");
+  assert.equal(PNPM_VERSION, "12.16.1");
 });
 
 test("the pinned files are byte-exact on every checkout (no EOL conversion)", () => {
@@ -217,6 +225,7 @@ test("hostile caller files and env never reach the install's argv, cwd, files or
     NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/",
     npm_config_userconfig: path.join(workspace, ".npmrc"),
     "npm_config_@cloudflare:registry": "http://127.0.0.1:9/",
+    "npm_config_@pnpm:registry": "http://127.0.0.1:9/",
     npm_config__authToken: "fixture-not-a-secret",
     PNPM_CONFIG_REGISTRY: "http://127.0.0.1:9/",
     PNPM_CONFIG_STORE_DIR: path.join(root, "hostile-store"),
@@ -229,7 +238,7 @@ test("hostile caller files and env never reach the install's argv, cwd, files or
   const outputs = await run({
     env,
     spawn: spawnSync,
-    pnpmProvider: (args) => { provided = args; return stub; },
+    pnpmProvider: (args) => { provided = args; return viaNode(stub); },
   });
 
   const target = path.join(temp, DEFAULT_DIR);
@@ -271,15 +280,15 @@ test("an installed wrangler other than the pinned release is rejected", async ()
   const { root, temp, workspace } = runnerLayout();
   const env = { ...process.env, RUNNER_TEMP: temp, GITHUB_WORKSPACE: workspace, GITHUB_OUTPUT: "" };
   const stub = stubPnpm(root, { version: "4.123.0", record: path.join(root, "record.json") });
-  await assert.rejects(run({ env, pnpmProvider: () => stub }), /installed wrangler@4\.123\.0, expected wrangler@4\.154\.0/);
+  await assert.rejects(run({ env, pnpmProvider: () => viaNode(stub) }), /installed wrangler@4\.123\.0, expected wrangler@4\.154\.0/);
 
   const empty = path.join(root, "empty-stub.mjs");
   writeFileSync(empty, "");
-  await assert.rejects(run({ env, pnpmProvider: () => empty }), /wrangler is not installed/);
+  await assert.rejects(run({ env, pnpmProvider: () => viaNode(empty) }), /wrangler is not installed/);
 
   const failing = path.join(root, "failing-stub.mjs");
   writeFileSync(failing, "process.exit(3);\n");
-  await assert.rejects(run({ env, pnpmProvider: () => failing }), /exited with 3/);
+  await assert.rejects(run({ env, pnpmProvider: () => viaNode(failing) }), /pnpm install exited with 3/);
 });
 
 test("a wrangler that resolves outside the install directory is rejected", async () => {
@@ -295,7 +304,7 @@ mkdirSync("node_modules");
 symlinkSync(${JSON.stringify(outside)}, "node_modules/wrangler", process.platform === "win32" ? "junction" : "dir");
 `);
   const env = { ...process.env, RUNNER_TEMP: temp, GITHUB_WORKSPACE: workspace, GITHUB_OUTPUT: "" };
-  await assert.rejects(run({ env, pnpmProvider: () => stub }), /resolves outside the install directory/);
+  await assert.rejects(run({ env, pnpmProvider: () => viaNode(stub) }), /resolves outside the install directory/);
 });
 
 test("a tampered package.json or lockfile stops the action before any install", async () => {
@@ -306,7 +315,7 @@ test("a tampered package.json or lockfile stops the action before any install", 
     cpSync(here, actionPath, { recursive: true });
     writeFileSync(path.join(actionPath, name), `${readFileSync(path.join(here, name), "utf8")}\n`);
     let called = false;
-    await assert.rejects(run({ env, actionPath, pnpmProvider: () => { called = true; return ""; } }),
+    await assert.rejects(run({ env, actionPath, pnpmProvider: () => { called = true; return viaNode(""); } }),
       new RegExp(`${name.replace(".", "\\.")} sha256 [0-9a-f]{64} does not match`));
     assert.equal(called, false, `${name}: pnpm was never provisioned`);
   }
@@ -319,17 +328,39 @@ test("pnpm is fetched by exact version from npmjs and its tarball checked, never
   const fakeSpawn = (command, args, options) => {
     calls.push({ command, args, options });
     // A tarball with the right name and the wrong bytes.
-    writeFileSync(path.join(iso.pnpmCli, `pnpm-${PNPM_VERSION}.tgz`), "not pnpm");
+    writeFileSync(path.join(iso.pnpmCli, `pnpm-exe.linux-x64-${PNPM_VERSION}.tgz`), "not pnpm");
     return { status: 0 };
   };
   const env = { PATH: "x" };
-  assert.throws(() => provisionPnpm({ iso, env, spawn: fakeSpawn }), /tarball integrity sha512-\S+ is not the pinned one/);
+  assert.throws(() => provisionPnpm({ iso, env, spawn: fakeSpawn, target: "linux-x64" }),
+    /@pnpm\/exe\.linux-x64 12\.16\.1 tarball integrity sha512-\S+ is not the pinned one/);
   assert.equal(calls.length, 1, "nothing is installed from an unverified tarball");
   assert.equal(calls[0].command, process.execPath);
   assert.match(calls[0].args[0], /npm-cli\.js$/);
-  assert.deepEqual(calls[0].args.slice(1), ["pack", `pnpm@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY,
-    "--prefix", iso.pnpmCli, "--no-workspaces"]);
+  // The native binary package itself, never the `pnpm` wrapper whose tarball
+  // hash does not cover the binary it runs.
+  assert.deepEqual(calls[0].args.slice(1), ["pack", `@pnpm/exe.linux-x64@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli,
+    "--registry", REGISTRY, "--prefix", iso.pnpmCli, "--no-workspaces"]);
   assert.equal(calls[0].options.env, env);
+});
+
+test("a host without a pinned pnpm binary is refused before anything is fetched", () => {
+  const { root } = runnerLayout();
+  const iso = isolationPaths(path.join(root, "target"));
+  let spawned = false;
+  for (const target of ["linux-x64-musl", "freebsd-x64", "constructor", "__proto__"]) {
+    assert.throws(() => provisionPnpm({ iso, env: {}, spawn: () => { spawned = true; return { status: 0 }; }, target }),
+      new RegExp(`no pinned pnpm 12\\.16\\.1 binary for ${target};`));
+  }
+  assert.equal(spawned, false);
+});
+
+test("the pnpm target names the platform package, with -musl only on a non-glibc Linux", () => {
+  assert.equal(pnpmTarget({ platform: "linux", arch: "x64", glibc: "2.39" }), "linux-x64");
+  assert.equal(pnpmTarget({ platform: "linux", arch: "arm64", glibc: null }), "linux-arm64-musl");
+  assert.equal(pnpmTarget({ platform: "win32", arch: "x64", glibc: null }), "win32-x64");
+  assert.equal(pnpmTarget({ platform: "darwin", arch: "arm64", glibc: null }), "darwin-arm64");
+  assert.ok(Object.hasOwn(PNPM_BINARIES, pnpmTarget()), `this host (${pnpmTarget()}) has a pinned binary`);
 });
 
 test("the Windows environment keeps profile, temp and config inside the install directory", () => {
