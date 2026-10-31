@@ -10,7 +10,7 @@ on:
       node-version:
         description: "Node.js major used by the Socket CLI"
         type: string
-        default: "24"
+        default: "26"
       socket-cli-version:
         description: "Exact stable version of the Socket CLI"
         type: string

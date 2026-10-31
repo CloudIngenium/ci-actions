@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version: "26"
           check-latest: false
 
       - name: Test action contracts
@@ -132,10 +132,10 @@ jobs:
       - id: baseline
         uses: ./runner-baseline
         with:
-          # Linux ran ./setup-node-pnpm above with its default (Node 26); Windows keeps
-          # the job's actions/setup-node 24.
+          # Linux ran ./setup-node-pnpm above with its default (Node 26); Windows ran
+          # the job's actions/setup-node 26.
           requirements-json: >-
-            {"node_major":${{ runner.os == 'Linux' && 26 || 24 }},"git_minimum":"2.40.0"}
+            {"node_major":26,"git_minimum":"2.40.0"}
 
       - id: baseline-drift
         uses: ./runner-baseline
@@ -230,7 +230,7 @@ jobs:
       # reads the workspace package.json.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version: "26"
           check-latest: false
           package-manager-cache: false
 
