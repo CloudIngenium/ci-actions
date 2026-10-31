@@ -9,7 +9,12 @@
  *   - the package.json and lockfile are hash-checked against the constants below;
  *   - pnpm itself is fetched by version and its tarball checked against a
  *     SHA-512 constant, never taken from PATH (a caller-influenced PATH entry
- *     would re-admit a caller-controlled installer);
+ *     would re-admit a caller-controlled installer). pnpm 12 is a native
+ *     executable published per platform as `@pnpm/exe.<os>-<arch>`; the `pnpm`
+ *     package is only a wrapper that takes the binary from an optional
+ *     dependency the wrapper's own tarball hash does not cover, or downloads
+ *     it. So the action fetches the host's `@pnpm/exe.*` tarball itself, checks
+ *     it against that platform's constant, and runs the binary directly;
  *   - npm and pnpm run with an allowlisted environment: HOME, XDG_* and the
  *     npm user/global config point into the install directory, the registry is
  *     npmjs, and no scoped registry, auth token, NODE_OPTIONS or caller
@@ -28,14 +33,39 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeOutputs } from "../lib/github-output.mjs";
 
 export const WRANGLER_VERSION = "4.154.0";
-export const PNPM_VERSION = "11.13.0";
+export const PNPM_VERSION = "12.16.1";
 export const REGISTRY = "https://registry.npmjs.org/";
 export const DEFAULT_DIR = "d1-wrangler";
 export const PACKAGE_JSON_SHA256 = "97f556c58c92613c0e1b62a409a87f8ada836637fc0fb520944b4b5e2929e5e7";
 export const LOCKFILE_SHA256 = "62227de125233232c72332ad20684667be2a799b3f77dadcd49ea7b4c02e8972";
-// dist.integrity of https://registry.npmjs.org/pnpm/-/pnpm-11.13.0.tgz
-export const PNPM_TARBALL_SHA512 =
-  "sha512-iNlHJNjy5sGGdEpVhMblnsrIaex7oV6ctM1ijo3HBmggskgdjuO1HqjaMjpzeAaKpYxVajcg0yt8IKBR0Ig2Og==";
+// dist.integrity of https://registry.npmjs.org/@pnpm/exe.<target>/-/exe.<target>-12.16.1.tgz,
+// with the executable's path inside the package. A host without a row is refused.
+export const PNPM_BINARIES = Object.freeze({
+  "linux-x64": Object.freeze({
+    integrity: "sha512-RK//8ZLcXGW8A2k8bQOXZDBN1Qu92zN4dYnG1bzj1zoQ1fkZ6jNzZ1AvXtsfGVma795CJtvoaF5bLXf4l/FIUw==",
+    bin: "pnpm",
+  }),
+  "linux-arm64": Object.freeze({
+    integrity: "sha512-JaRd5gNxwdNGBBkrZFt8bknrK4YmHVJBW0JMhUQ0fJ0dEYp6C2GT9ExaCqOO8EwYEyqM+jpKgJIK+8WFaJy3ew==",
+    bin: "pnpm",
+  }),
+  "win32-x64": Object.freeze({
+    integrity: "sha512-k+FhRJ0ttphFoFIVB1Sk4v76YJAulafmA/Ly57cysesUhhIzVlApeOShUz0jXubKx317TThlEfpQrukldnqORA==",
+    bin: "pnpm.exe",
+  }),
+  "win32-arm64": Object.freeze({
+    integrity: "sha512-Ox3kNNVxtGw6pK7SVejmeOUgHhUTZgAM7NQQ6cU7frPw3ix9+j7d2MGbRg3fyEFAaKWq8ZAZLTQGcDyLnAu+qA==",
+    bin: "pnpm.exe",
+  }),
+  "darwin-x64": Object.freeze({
+    integrity: "sha512-xZvQBFqcZjO7vFKTK3XsJpqY6lnBL9EWSLCzVUPq3kZ94+D96gwJCa76xxGNK8Cj32f4eeM91Qg+yNRR4sRpDw==",
+    bin: "pnpm",
+  }),
+  "darwin-arm64": Object.freeze({
+    integrity: "sha512-pVbmIIbhixiLvADLu1WA3TaW8FZy/D72R1De27WbbFx8/2mxvnsTyFVm4fO9kjpjMY7RzJd48CiQ96p8fO3ebQ==",
+    bin: "pnpm",
+  }),
+});
 export const PINNED_FILES = Object.freeze({
   "package.json": PACKAGE_JSON_SHA256,
   "pnpm-lock.yaml": LOCKFILE_SHA256,
@@ -211,36 +241,54 @@ export function findNpmCli(execPath = process.execPath, platform = process.platf
   return found;
 }
 
-function runNode({ spawn, execPath, script, args, cwd, env }) {
-  const result = spawn(execPath, [script, ...args], { cwd, env, stdio: ["ignore", "inherit", "inherit"] });
-  if (result.error) fail(`${path.basename(script)} ${args[0]} could not start: ${result.error.message}`);
-  if (result.status !== 0) fail(`${path.basename(script)} ${args[0]} exited with ${result.status ?? result.signal}`);
+/** `label` names the step in errors, e.g. `npm pack` or `pnpm install`. */
+function runCommand({ spawn, command, args, cwd, env, label }) {
+  const result = spawn(command, args, { cwd, env, stdio: ["ignore", "inherit", "inherit"] });
+  if (result.error) fail(`${label} could not start: ${result.error.message}`);
+  if (result.status !== 0) fail(`${label} exited with ${result.status ?? result.signal}`);
 }
 
-/** Fetch pnpm by exact version, check the tarball's SHA-512, install it into the isolation dir. */
-export function provisionPnpm({ iso, env, spawn = spawnSync, execPath = process.execPath }) {
+/**
+ * The `@pnpm/exe.<target>` suffix for this host: `<platform>-<arch>`, plus
+ * `-musl` on a Linux whose C library is not glibc (pnpm ships musl builds under
+ * their own name, and this action pins none of them).
+ */
+export function pnpmTarget({ platform = process.platform, arch = process.arch, glibc } = {}) {
+  const runtime = glibc !== undefined ? glibc : process.report?.getReport?.().header?.glibcVersionRuntime;
+  return `${platform}-${arch}${platform === "linux" && !runtime ? "-musl" : ""}`;
+}
+
+/**
+ * Fetch the host's native pnpm by exact version, check the tarball's SHA-512
+ * against this target's constant, unpack it into the isolation dir and return
+ * the executable to run: `{ command, args }`.
+ */
+export function provisionPnpm({ iso, env, spawn = spawnSync, execPath = process.execPath, target = pnpmTarget() }) {
+  const pinned = Object.hasOwn(PNPM_BINARIES, target) ? PNPM_BINARIES[target] : null;
+  if (!pinned) fail(`no pinned pnpm ${PNPM_VERSION} binary for ${target}; pinned: ${Object.keys(PNPM_BINARIES).join(", ")}`);
+  const packageName = `@pnpm/exe.${target}`;
   const npmCli = findNpmCli(execPath);
   mkdirSync(iso.pnpmCli, { recursive: true });
-  runNode({
-    spawn, execPath, script: npmCli, cwd: iso.pnpmCli, env,
-    // --prefix (and --no-workspaces): otherwise npm walks up to a parent
-    // package.json whose workspaces name the install dir and loads the .npmrc
-    // beside it as project config. With --prefix npm never walks.
-    args: ["pack", `pnpm@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY,
-      "--prefix", iso.pnpmCli, "--no-workspaces"],
-  });
-  const tarball = path.join(iso.pnpmCli, `pnpm-${PNPM_VERSION}.tgz`);
+  const npm = (args) => runCommand({ spawn, command: execPath, args: [npmCli, ...args], cwd: iso.pnpmCli, env, label: `npm ${args[0]}` });
+  // --prefix (and --no-workspaces): otherwise npm walks up to a parent
+  // package.json whose workspaces name the install dir and loads the .npmrc
+  // beside it as project config. With --prefix npm never walks.
+  npm(["pack", `${packageName}@${PNPM_VERSION}`, "--pack-destination", iso.pnpmCli, "--registry", REGISTRY,
+    "--prefix", iso.pnpmCli, "--no-workspaces"]);
+  const tarball = path.join(iso.pnpmCli, `pnpm-exe.${target}-${PNPM_VERSION}.tgz`);
   if (!existsSync(tarball)) fail(`npm pack did not produce ${tarball}`);
   const integrity = sha512Integrity(tarball);
-  if (integrity !== PNPM_TARBALL_SHA512) fail(`pnpm ${PNPM_VERSION} tarball integrity ${integrity} is not the pinned one`);
+  if (integrity !== pinned.integrity) fail(`${packageName} ${PNPM_VERSION} tarball integrity ${integrity} is not the pinned one`);
   const prefix = path.join(iso.pnpmCli, "prefix");
-  runNode({
-    spawn, execPath, script: npmCli, cwd: iso.pnpmCli, env,
-    args: ["install", "--prefix", prefix, "--ignore-scripts", "--no-save", "--no-package-lock", "--no-audit", "--no-fund", tarball],
-  });
-  const manifest = JSON.parse(readFileSync(path.join(prefix, "node_modules", "pnpm", "package.json"), "utf8"));
-  if (manifest.name !== "pnpm" || manifest.version !== PNPM_VERSION) fail(`installed pnpm is ${manifest.name}@${manifest.version}`);
-  return path.join(prefix, "node_modules", "pnpm", "bin", "pnpm.mjs");
+  // The tarball has no dependencies and no scripts; npm only unpacks it and
+  // keeps the executable bit.
+  npm(["install", "--prefix", prefix, "--ignore-scripts", "--no-save", "--no-package-lock", "--no-audit", "--no-fund", tarball]);
+  const dir = path.join(prefix, "node_modules", "@pnpm", `exe.${target}`);
+  const manifest = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+  if (manifest.name !== packageName || manifest.version !== PNPM_VERSION) fail(`installed pnpm is ${manifest.name}@${manifest.version}`);
+  const command = path.join(dir, pinned.bin);
+  if (!existsSync(command)) fail(`pnpm executable is missing: ${command}`);
+  return { command, args: [] };
 }
 
 export function pnpmInstallArgs(iso) {
@@ -281,7 +329,7 @@ export async function run({
   pnpmProvider = provisionPnpm,
 } = {}) {
   const [major, minor] = process.versions.node.split(".").map(Number);
-  if (!(major > 22 || (major === 22 && minor >= 13))) fail(`pnpm ${PNPM_VERSION} needs Node >= 22.13; this is ${process.version}`);
+  if (!(major > 22 || (major === 22 && minor >= 13))) fail(`wrangler-pinned needs Node >= 22.13; this is ${process.version}`);
   const target = resolveTarget({ runnerTemp: env.RUNNER_TEMP, workspace: env.GITHUB_WORKSPACE, dir: env.INPUT_DIR });
   rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
@@ -295,7 +343,7 @@ export async function run({
 
   const childEnv = isolatedEnv({ target, baseEnv: env, platform, execPath });
   const pnpm = pnpmProvider({ iso, env: childEnv, spawn, execPath });
-  runNode({ spawn, execPath, script: pnpm, args: pnpmInstallArgs(iso), cwd: target, env: childEnv });
+  runCommand({ spawn, command: pnpm.command, args: [...pnpm.args, ...pnpmInstallArgs(iso)], cwd: target, env: childEnv, label: "pnpm install" });
 
   for (const [name, expected] of Object.entries(PINNED_FILES)) {
     if (sha256File(path.join(target, name)) !== expected) fail(`${name} changed during the install`);

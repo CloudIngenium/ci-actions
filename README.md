@@ -540,15 +540,21 @@ and is deleted and recreated on every run.
 - `package.json` pins `wrangler` exactly (`4.154.0`), a deliberate exception to
   the caret default: this is a binary that receives a token, so every version
   change is reviewed. `pnpm-lock.yaml` was generated with pnpm 11.13.0 against
-  `https://registry.npmjs.org/`. Both are checked against SHA-256 constants in
+  `https://registry.npmjs.org/`; pnpm 12.16.1 regenerates it byte for byte. Both are checked against SHA-256 constants in
   `wrangler-pinned.mjs` before and after they are staged, and
   `.gitattributes` keeps them byte-exact on Windows checkouts.
 - pnpm is not taken from `PATH` and not from the caller's `packageManager`:
   `setup-node-pnpm` resolves it from the caller, and any `PATH` entry an
-  earlier step wrote is caller-influenced. The action runs the npm that ships
-  beside the running `node`, packs `pnpm@11.13.0` from npmjs, checks the
-  tarball against a SHA-512 constant, and installs it inside the install
-  directory. Node >= 22.13 is required, and the `node` on `PATH` must be a
+  earlier step wrote is caller-influenced. pnpm 12 is a native executable
+  published per platform as `@pnpm/exe.<os>-<arch>`; the `pnpm` package is a
+  wrapper whose tarball hash does not cover the binary it runs (an optional
+  dependency, or a download on first use). So the action runs the npm that
+  ships beside the running `node`, packs the host's `@pnpm/exe.<os>-<arch>@12.16.1`
+  from npmjs, checks the tarball against that platform's SHA-512 constant,
+  unpacks it inside the install directory and runs the binary directly.
+  Pinned platforms: linux-x64, linux-arm64, win32-x64, win32-arm64,
+  darwin-x64, darwin-arm64; any other host (musl Linux included) is refused.
+  Node >= 22.13 is required, and the `node` on `PATH` must be a
   full distribution with npm beside it, as `actions/setup-node` installs. The
   runner's own bundled node is not one on Windows, and `setup-ci-phase-emitter`
   puts that node first on `PATH`, so run `actions/setup-node` again after it.
@@ -561,7 +567,8 @@ and is deleted and recreated on every run.
   --ignore-pnpmfile --ignore-workspace`. pnpm looks for `pnpm-workspace.yaml`
   and `.pnpmfile.cjs` in parent directories, and `RUNNER_TEMP` is a parent:
   without the last two flags a planted `RUNNER_TEMP/pnpm-workspace.yaml` naming
-  a pnpmfile ran caller code during the install (measured on pnpm 11.13.0).
+  a pnpmfile ran caller code during the install (measured on pnpm 11.13.0;
+  pnpm 12.16.1 with both flags ignores the planted files).
 - Run it before any caller-controlled code executes in the job. A step that
   already ran caller code could have replaced `node` itself.
 - wrangler loads `.env` and `.env.local` from its working directory into its own
