@@ -48,7 +48,7 @@ function runnerLayout() {
 /** Hostile copies of every file a caller could use to steer an install. */
 function plantHostileFiles(dir, marker) {
   writeFileSync(path.join(dir, ".npmrc"),
-    "registry=http://127.0.0.1:9/\n@cloudflare:registry=http://127.0.0.1:9/\n//127.0.0.1:9/:_authToken=fixture-not-a-secret\n");
+    "registry=http://127.0.0.1:9/\n@cloudflare:registry=http://127.0.0.1:9/\n@pnpm:registry=http://127.0.0.1:9/\n//127.0.0.1:9/:_authToken=fixture-not-a-secret\n");
   writeFileSync(path.join(dir, "pnpm-workspace.yaml"),
     "packages: ['.']\nregistries:\n  default: http://127.0.0.1:9/\noverrides:\n  wrangler: 4.123.0\npnpmfile: hostile.cjs\n");
   writeFileSync(path.join(dir, "package.json"),
@@ -225,6 +225,7 @@ test("hostile caller files and env never reach the install's argv, cwd, files or
     NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/",
     npm_config_userconfig: path.join(workspace, ".npmrc"),
     "npm_config_@cloudflare:registry": "http://127.0.0.1:9/",
+    "npm_config_@pnpm:registry": "http://127.0.0.1:9/",
     npm_config__authToken: "fixture-not-a-secret",
     PNPM_CONFIG_REGISTRY: "http://127.0.0.1:9/",
     PNPM_CONFIG_STORE_DIR: path.join(root, "hostile-store"),
