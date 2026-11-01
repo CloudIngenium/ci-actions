@@ -6,7 +6,7 @@ outputs:
     description: Exact pnpm version selected from the input, packageManager, or fallback.
     value: ${{ steps.resolve_pnpm.outputs.version }}
   cache-class:
-    description: Exact initial state of the isolated pnpm store.
+    description: Initial state of the pnpm store, cold for a per-job store and unknown for a host-shared one.
     value: ${{ steps.cache_evidence.outputs['cache-class'] }}
   cache-key-hash:
     description: SHA-256 cache key derived from Node, pnpm, and the lockfile.
@@ -97,6 +97,7 @@ runs:
         echo "version=$version" >> "$GITHUB_OUTPUT"
 
     - name: Install exact pnpm in an isolated prefix
+      id: install_pnpm
       shell: bash
       env:
         PNPM_VERSION: ${{ steps.resolve_pnpm.outputs.version }}
@@ -107,32 +108,34 @@ runs:
         # Installs, runs `pnpm --version` and retries a broken install: pnpm 12's binary is an
         # optional dependency npm drops silently when the registry stalls (install-pnpm.sh says why).
         bash "$GITHUB_ACTION_PATH/install-pnpm.sh" "$pnpm_root"
-        # pnpm 11 reads PNPM_CONFIG_* only and ignores NPM_CONFIG_STORE_DIR, so
-        # without PNPM_CONFIG_STORE_DIR the "isolated" store fell through to the
-        # runner user's global pnpm config. On a self-hosted runner that is
-        # whatever another job wrote there last (Runner-Ubuntu-03g, 2026-09-26: a
-        # Knowledge-Hub job's deleted $RUNNER_TEMP store). NPM_CONFIG_STORE_DIR
+        # The store is always explicit: the runner host's shared store when it declares one,
+        # else a per-job one under the prefix (select-store.sh says why). NPM_CONFIG_STORE_DIR
         # stays for pnpm 10 callers.
+        read -r store_kind store < <(bash "$GITHUB_ACTION_PATH/select-store.sh" "$pnpm_root")
+        echo "store-kind=$store_kind" >> "$GITHUB_OUTPUT"
+        echo "pnpm store: $store_kind ($store)"
         {
           echo "PNPM_HOME=$pnpm_root/bin"
           echo "PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false"
-          echo "PNPM_CONFIG_STORE_DIR=$pnpm_root/store"
-          echo "NPM_CONFIG_STORE_DIR=$pnpm_root/store"
+          echo "PNPM_CONFIG_STORE_DIR=$store"
+          echo "NPM_CONFIG_STORE_DIR=$store"
         } >> "$GITHUB_ENV"
         echo "$pnpm_root/bin" >> "$GITHUB_PATH"
 
-    - name: Classify isolated pnpm store
+    - name: Classify pnpm store
       id: cache_evidence
       shell: bash
       env:
         LOCK_FILE: ${{ inputs.lock-file }}
         PNPM_VERSION: ${{ steps.resolve_pnpm.outputs.version }}
+        STORE_KIND: ${{ steps.install_pnpm.outputs['store-kind'] }}
       run: |
         set -euo pipefail
         node "$GITHUB_ACTION_PATH/cache-evidence.mjs" \
           --lock-file "$LOCK_FILE" \
           --node-version "$(node --version)" \
           --pnpm-version "$PNPM_VERSION" \
+          --store-kind "$STORE_KIND" \
           --github-output "$GITHUB_OUTPUT"
 
     - name: Emit exact pnpm cache observation

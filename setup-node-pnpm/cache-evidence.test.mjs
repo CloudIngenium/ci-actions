@@ -36,3 +36,14 @@ test("cache key changes when lock content changes", async () => {
   const after = await resolveIsolatedPnpmCacheEvidence({ workspace, lockFile: "pnpm-lock.yaml", nodeVersion: "v24.5.0", pnpmVersion: "11.13.0" });
   assert.notEqual(after.cacheKeyHash, before.cacheKeyHash);
 });
+
+test("a host-shared store is unknown, never cold, and keeps the same cache key", async () => {
+  const workspace = tmpFixture("pnpm-cache-evidence");
+  await writeFile(path.join(workspace, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  const args = { workspace, lockFile: "pnpm-lock.yaml", nodeVersion: "v24.5.0", pnpmVersion: "11.13.0" };
+  const isolated = await resolveIsolatedPnpmCacheEvidence(args);
+  const shared = await resolveIsolatedPnpmCacheEvidence({ ...args, storeKind: "host-shared" });
+  assert.equal(shared.cacheClass, "unknown");
+  assert.equal(shared.cacheKeyHash, isolated.cacheKeyHash);
+  await assert.rejects(resolveIsolatedPnpmCacheEvidence({ ...args, storeKind: "shared" }), /store-kind/);
+});

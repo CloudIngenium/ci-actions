@@ -502,11 +502,21 @@ override, and `package-manager-file` selects a nested installation boundary.
 When no declaration exists, the action falls back to pnpm 11.28.8, the pnpm 11
 floor in Knowledge-Hub `config/platform-catalog.json` (`packageManagerFloors`);
 npm marks 11.13.0, the old fallback, as a broken release. It never uses
-Corepack or `pnpm/action-setup`, and it does not share a pnpm CLI or store between
-jobs.
+Corepack or `pnpm/action-setup`, and it never shares the pnpm CLI between jobs.
 
-Because the action deletes and recreates its job-scoped pnpm store, its initial
-cache class is provably `cold`. When an exact numeric job ID and the generated
+The store is always set explicitly. When the runner host declares a shared store
+it prunes itself, and that store is an existing writable absolute directory, the
+action uses it: `PNPM_STORE_DIR` on the credential-free k3s agents (infra-iac, JC
+D374) or `pnpm_config_store_dir` on CI-SP-01's runners (JC D375), `PNPM_STORE_DIR`
+first. A warm store downloads nothing again, because pnpm checks every file it
+takes from it, and each private `@cloudingenium` tarball it skips is one GitHub
+Packages does not bill as data transfer. Any other runner gets a per-job store
+under the pnpm prefix. `setup-node-pnpm/select-store.sh` makes the choice, and
+the job log prints it as `pnpm store: <kind> (<dir>)`.
+
+A per-job store starts empty, so its initial cache class is provably `cold`. A
+host-shared store's state per lockfile is not measured here, so it reports
+`unknown`. When an exact numeric job ID and the generated
 Knowledge-Hub manifest digest are supplied, it writes a canonical
 `cache_observation` below `RUNNER_TEMP/ci-telemetry`; otherwise telemetry is
 reported as `not_requested` rather than guessed. The cache key is derived from
