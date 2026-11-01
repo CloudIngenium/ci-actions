@@ -59,6 +59,21 @@ test("a declared store that is missing, relative or not writable falls back to t
   }
 });
 
+test("a declared store that the group or anyone else can write is refused (another account could poison it)", { skip: process.platform === "win32" }, () => {
+  const prefix = tmpFixture("select-store-prefix");
+  const root = tmpFixture("select-store-perm");
+  for (const [name, mode] of [["world", 0o777], ["group", 0o775]]) {
+    const dir = path.join(root, name);
+    mkdirSync(dir);
+    chmodSync(dir, mode);
+    assert.deepEqual(select(prefix, { PNPM_STORE_DIR: dir }), { kind: "isolated", dir: `${prefix}/store` }, name);
+  }
+  const owner = path.join(root, "owner");
+  mkdirSync(owner);
+  chmodSync(owner, 0o755);
+  assert.deepEqual(select(prefix, { PNPM_STORE_DIR: owner }), { kind: "host-shared", dir: owner });
+});
+
 test("the action points pnpm at the selected store and reports a shared one as unknown", () => {
   const source = readFileSync(action, "utf8");
   assert.match(source, /select-store\.sh" "\$pnpm_root"/);
