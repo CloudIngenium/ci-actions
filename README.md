@@ -505,14 +505,23 @@ npm marks 11.13.0, the old fallback, as a broken release. It never uses
 Corepack or `pnpm/action-setup`, and it never shares the pnpm CLI between jobs.
 
 The store is always set explicitly. When the runner host declares a shared store
-it prunes itself, and that store is an existing writable absolute directory, the
-action uses it: `PNPM_STORE_DIR` on the credential-free k3s agents (infra-iac, JC
-D374) or `pnpm_config_store_dir` on CI-SP-01's runners (JC D375), `PNPM_STORE_DIR`
-first. A warm store downloads nothing again, because pnpm checks every file it
-takes from it, and each private `@cloudingenium` tarball it skips is one GitHub
-Packages does not bill as data transfer. Any other runner gets a per-job store
-under the pnpm prefix. `setup-node-pnpm/select-store.sh` makes the choice, and
-the job log prints it as `pnpm store: <kind> (<dir>)`.
+it prunes itself, the action uses it: `PNPM_STORE_DIR` on the credential-free k3s
+agents (infra-iac, JC D374) or `pnpm_config_store_dir` on CI-SP-01's runners (JC
+D375), `PNPM_STORE_DIR` first. The directory must be absolute, exist, be writable,
+be owned by the runner user and be writable by no group or other account; a
+declared store that fails any of these is ignored with a `pnpm store` warning in
+the job, and the job gets the per-job store. A warm store downloads nothing again,
+and each private `@cloudingenium` tarball it skips is one GitHub Packages does not
+bill as data transfer. `setup-node-pnpm/select-store.sh` makes the choice, and the
+job log prints it as `pnpm store: <kind> (<dir>)`.
+
+The trust boundary is the host, not this check. pnpm rehashes a store file whose
+bytes changed, but it trusts the store's own index, so a job that can write a
+shared store can plant an entry the next job on that host takes. Only
+credential-free runners declare one; a runner that holds secrets must never carry
+`PNPM_STORE_DIR` or `pnpm_config_store_dir` in its environment. A caller on any
+other runner that exports either variable for its own reasons now gets that
+directory as its store, if it passes the checks.
 
 A per-job store starts empty, so its initial cache class is provably `cold`. A
 host-shared store's state per lockfile is not measured here, so it reports

@@ -43,7 +43,7 @@ inputs:
     required: false
     default: "@cloudingenium"
   lock-file:
-    description: Dependency lockfile used to content-address the isolated pnpm store observation.
+    description: Dependency lockfile used to content-address the pnpm store observation.
     required: false
     default: pnpm-lock.yaml
   job-id:
